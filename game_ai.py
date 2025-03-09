@@ -6,7 +6,7 @@ import random
 from collections import deque
 import copy
 from tetris_game import *
-from configs import GAME_CONFIGS
+from configs import GAME_CONFIG
 
 class TetrisNet(nn.Module):
     def __init__(self, rows, cols):
@@ -34,7 +34,6 @@ class TetrisNet(nn.Module):
 class TetrisAI:
     def __init__(self):
         # Parameters
-        super(TetrisNet, self).__init__()
         self.buffer_size = 50000  # Experience replay buffer size
         self.batch_size = 512
         self.gamma = 0.99  # Discount factor
