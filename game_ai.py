@@ -295,7 +295,7 @@ class AppWrapper:
         # Start with a new piece
         newFallingPiece(self)
 
-def train_tetris_ai(episodes=1000):
+def train_tetris_ai(episodes=1000, save_interval=100):
     ai = TetrisAI()
     env = GameEnvironment()
     
@@ -331,7 +331,7 @@ def train_tetris_ai(episodes=1000):
         print(f"Episode {episode+1}/{episodes}, Total Reward: {total_reward}")
         
         # Save model periodically
-        if (episode + 1) % 100 == 0:
+        if (episode + 1) % save_interval == 0:
             ai.save_model(f"tetris_model_episode_{episode+1}.pt")
     
     return ai
