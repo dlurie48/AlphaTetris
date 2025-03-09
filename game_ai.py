@@ -9,7 +9,7 @@ from tetris_game import *
 from configs import GAME_CONFIG
 
 class TetrisNet(nn.Module):
-    def __init__(self, rows, cols):
+    def __init__(self):
         super(TetrisNet, self).__init__()
         # CNN for processing the board state
         self.conv_layers = nn.Sequential(
@@ -20,6 +20,9 @@ class TetrisNet(nn.Module):
             nn.Flatten()
         )
         
+        rows = GAME_CONFIG['rows']
+        cols = GAME_CONFIG['cols']
+
         # Fully connected layers for the output
         self.fc_layers = nn.Sequential(
             nn.Linear(64 * rows * cols, 128),  # Assuming 20x10 board after convolutions
@@ -140,7 +143,8 @@ class TetrisAI:
                 for action in possible_actions:
                     # Predict value of resulting state
                     resulting_state = self.get_resulting_state(app, action)
-                    predicted_value = self.model(resulting_state).item()
+                    res_state_tensor = resulting_state[0]
+                    predicted_value = self.model(res_state_tensor).item()
                     
                     if predicted_value > best_value:
                         best_value = predicted_value

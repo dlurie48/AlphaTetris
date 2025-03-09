@@ -219,7 +219,7 @@ def appStarted(app):
 #set dimensions of board to create grid dimensions and size, app size, margins
 def gameDimensions():
     return (GAME_CONFIG['rows'], GAME_CONFIG['cols'], 
-            GAME_CONFIG['cellsize'], GAME_CONFIG['margin'])
+            GAME_CONFIG['cell_size'], GAME_CONFIG['margin'])
 
 #starts new game with "r", moves piece with arrow keys, hard drops with space
 def keyPressed(app, event):
