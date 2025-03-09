@@ -1,14 +1,19 @@
+import decimal
 from cmu_112_graphics import *
+import copy
+import numpy as np
+import random
 
 #################################################
 # Helper functions
 #################################################
 
+
 def almostEqual(d1, d2, epsilon=10**-7):
     # note: use math.isclose() outside 15-112 with Python version 3.5 or later
     return (abs(d2 - d1) < epsilon)
 
-import decimal
+
 def roundHalfUp(d):
     # Round to nearest with ties going away from zero.
     rounding = decimal.ROUND_HALF_UP
@@ -18,8 +23,160 @@ def roundHalfUp(d):
 
 
 #################################################
-# Tetris
+# AI Interaction Functions
 #################################################
+
+def getBoardState(app):
+    """
+    Converts the board state to a format suitable for NN processing
+    Returns a dictionary containing:
+    - board_grid: current state of the board
+    - current_piece: type of current piece
+    - hold_piece: type of held piece (or None)
+    - next_pieces: list of next pieces
+    """
+    # Create a numerical representation of the board
+    # 0 for empty, 1 for filled
+    boardGrid = []
+    for row in range(app.rows):
+        boardRow = []
+        for col in range(app.cols):
+            if app.board[row][col] == app.emptyColor:
+                boardRow.append(0)
+            else:
+                boardRow.append(1)
+        boardGrid.append(boardRow)
+    
+    # Get current piece type
+    currentPieceIndex = app.tetrisPieces.index(app.fallingPiece)
+    currentPiece = currentPieceIndex
+    
+    # Get next pieces (if implemented)
+    nextPieces = app.nextPieces if hasattr(app, 'nextPieces') else []
+    
+    # Get hold piece (if implemented)
+    holdPiece = app.holdPiece if hasattr(app, 'holdPiece') else None
+    
+    return {
+        'board_grid': boardGrid,
+        'current_piece': currentPiece,
+        'hold_piece': holdPiece,
+        'next_pieces': nextPieces
+    }
+
+def getColumnHeights(app):
+    """
+    Calculate the height of each column on the board
+    """
+    heights = [0] * app.cols
+    for col in range(app.cols):
+        for row in range(app.rows):
+            if app.board[row][col] != app.emptyColor:
+                heights[col] = app.rows - row
+                break
+    return heights
+
+def getHoles(app):
+    """
+    Find the positions of all holes in the board
+    A hole is an empty cell with a filled cell above it
+    """
+    holes = []
+    for col in range(app.cols):
+        foundBlock = False
+        for row in range(app.rows):
+            if app.board[row][col] != app.emptyColor:
+                foundBlock = True
+            elif foundBlock and app.board[row][col] == app.emptyColor:
+                holes.append((row, col))
+    return holes
+
+def generateAllPossiblePlacements(app):
+    """
+    Generates all possible valid placements for the current piece
+    Returns a list of (position, rotation, resulting_board, score) tuples
+    """
+    possiblePlacements = []
+    originalPiece = copy.deepcopy(app.fallingPiece)
+    originalRow = app.fallingPieceRow
+    originalCol = app.fallingPieceCol
+    
+    # Try all rotations
+    for rotation in range(4):  # Most pieces have at most 4 unique rotations
+        app.fallingPiece = copy.deepcopy(originalPiece)
+        for _ in range(rotation):
+            _rotatePieceWithoutChecking(app)
+        
+        # Try all columns
+        for col in range(-len(app.fallingPiece[0]), app.cols):
+            app.fallingPieceRow = 0
+            app.fallingPieceCol = col
+            
+            # Check if this placement is valid
+            if fallingPieceIsLegal(app, app.fallingPieceRow, app.fallingPieceCol):
+                # Simulate dropping the piece
+                simulatedApp = copy.deepcopy(app)
+                hardDrop(simulatedApp)
+                
+                # Calculate score for this move
+                originalScore = app.score
+                placeFallingPiece(simulatedApp)
+                scoreChange = simulatedApp.score - originalScore
+                
+                # Save this placement
+                resultingBoard = copy.deepcopy(simulatedApp.board)
+                possiblePlacements.append((col, rotation, resultingBoard, scoreChange))
+    
+    # Restore original piece and position
+    app.fallingPiece = originalPiece
+    app.fallingPieceRow = originalRow
+    app.fallingPieceCol = originalCol
+    
+    return possiblePlacements
+
+def _rotatePieceWithoutChecking(app):
+    """
+    Rotates the falling piece without checking if it's legal.
+    Used during placement generation.
+    """
+    oldPiece = app.fallingPiece
+    oldNumRows = len(oldPiece)
+    oldNumCols = len(oldPiece[0])
+    newNumRows, newNumCols = oldNumCols, oldNumRows
+    
+    rotatedFallingPiece = [([None] * newNumCols) for row in range(newNumRows)]
+    i = 0
+    for col in range(oldNumCols - 1, -1, -1):
+        j = 0
+        for row in range(oldNumRows):
+            rotatedFallingPiece[i][j] = oldPiece[row][col]
+            j += 1
+        i += 1
+    
+    app.fallingPiece = rotatedFallingPiece
+
+def executePlacement(app, col, rotation):
+    """
+    Executes a placement selected by the AI
+    """
+    # Reset position
+    app.fallingPieceRow = 0
+    app.fallingPieceCol = app.cols // 2 - len(app.fallingPiece[0]) // 2
+    
+    # Rotate to desired orientation
+    for _ in range(rotation):
+        rotateFallingPiece(app)
+    
+    # Move to desired column
+    while app.fallingPieceCol > col:
+        moveFallingPiece(app, 0, -1)
+    while app.fallingPieceCol < col:
+        moveFallingPiece(app, 0, 1)
+    
+    # Drop the piece
+    hardDrop(app)
+    placeFallingPiece(app)
+    newFallingPiece(app)
 
 #starts app with 
 def appStarted(app):
@@ -99,6 +256,31 @@ def timerFired(app):
             if not(fallingPieceIsLegal(app,
                         app.fallingPieceRow,app.fallingPieceCol)):
                         app.isGameOver=True
+
+# receives and performs DRL move
+def runAIMove(app):
+    """Handle AI's decision making process"""
+    from game_ai import getAIDecision  # Import here to avoid circular imports
+    
+    # Get all possible placements
+    possiblePlacements = generateAllPossiblePlacements(app)
+    
+    # Get the board state for AI
+    boardState = getBoardState(app)
+    
+    # Let AI make the decision
+    # In reinforcement learning, we would sometimes explore randomly
+    # based on the epsilon value
+    if random.random() < app.epsilon:
+        # Explore - make a random move
+        placement = random.choice(possiblePlacements)
+        col, rotation, _, _ = placement
+    else:
+        # Exploit - use the AI to make the best move
+        col, rotation = getAIDecision(boardState, possiblePlacements)
+    
+    # Execute the chosen placement
+    executePlacement(app, col, rotation)
 
 #draws board and pieces on canvas
 def drawCell(app,canvas,row,col,color):
@@ -273,9 +455,6 @@ def playTetris():
 #################################################
 
 def main():
-    #cs112_s22_week6_linter.lint()
-    #testAll()
-    #s22MidtermAnimation_()
     playTetris()
 
 if __name__ == '__main__':
