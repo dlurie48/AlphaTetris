@@ -146,28 +146,49 @@ def _rotatePieceWithoutChecking(app):
     
     app.fallingPiece = rotatedFallingPiece
 
-def executePlacement(app, col, rotation):
+def executePlacement(app, col, rotation=None, action_dict=None):
     """
     Executes a placement selected by the AI
+    
+    Can work in two modes:
+    1. Legacy mode: Takes col and rotation values
+    2. Action dict mode: Takes a dictionary from choose_action with piece, row, col
+    
+    Args:
+        app: The Tetris app instance
+        col: Column position (legacy mode)
+        rotation: Rotation value (legacy mode)
+        action_dict: Dictionary from choose_action with piece, row, col (new mode)
     """
-    # Reset position
-    app.fallingPieceRow = 0
-    app.fallingPieceCol = app.cols // 2 - len(app.fallingPiece[0]) // 2
-    
-    # Rotate to desired orientation
-    for _ in range(rotation):
-        rotateFallingPiece(app)
-    
-    # Move to desired column
-    while app.fallingPieceCol > col:
-        moveFallingPiece(app, 0, -1)
-    while app.fallingPieceCol < col:
-        moveFallingPiece(app, 0, 1)
-    
-    # Drop the piece
-    hardDrop(app)
-    placeFallingPiece(app)
-    newFallingPiece(app)
+    if action_dict is not None:
+        # New mode: Place the piece directly at the specified location
+        app.fallingPiece = action_dict['piece']
+        app.fallingPieceRow = action_dict['row']
+        app.fallingPieceCol = action_dict['col']
+        
+        # Place the piece and get a new one
+        placeFallingPiece(app)
+        newFallingPiece(app)
+    else:
+        # Legacy mode: Manually move and rotate the piece
+        # Reset position
+        app.fallingPieceRow = 0
+        app.fallingPieceCol = app.cols // 2 - len(app.fallingPiece[0]) // 2
+        
+        # Rotate to desired orientation
+        for _ in range(rotation):
+            rotateFallingPiece(app)
+        
+        # Move to desired column
+        while app.fallingPieceCol > col:
+            moveFallingPiece(app, 0, -1)
+        while app.fallingPieceCol < col:
+            moveFallingPiece(app, 0, 1)
+        
+        # Drop the piece
+        hardDrop(app)
+        placeFallingPiece(app)
+        newFallingPiece(app)
 
 #################################################
 # Tetris Game
@@ -256,7 +277,9 @@ def timerFired(app):
 # receives and performs DRL move
 def runAIMove(app):
     """Handle AI's decision making process"""
-    from game_ai import getAIDecision  # Import here to avoid circular imports
+    if not hasattr(app, '_ai_instance'):
+        from game_ai import TetrisAI
+        app._ai_instance = TetrisAI()
     
     # Get all possible placements
     possiblePlacements = generateAllPossiblePlacements(app)
@@ -271,12 +294,11 @@ def runAIMove(app):
         # Explore - make a random move
         placement = random.choice(possiblePlacements)
         col, rotation, _, _ = placement
+        executePlacement(app, col, rotation)
     else:
         # Exploit - use the AI to make the best move
-        col, rotation = getAIDecision(boardState, possiblePlacements)
-    
-    # Execute the chosen placement
-    executePlacement(app, col, rotation)
+        action = app._ai_instance.choose_action(app, boardState)
+        executePlacement(app, None, None, action_dict=action)
 
 #draws board and pieces on canvas
 def drawCell(app,canvas,row,col,color):

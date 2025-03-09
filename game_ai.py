@@ -122,35 +122,29 @@ class TetrisAI:
         return possible_actions
     
     def choose_action(self, app, state):
-        # Epsilon-greedy policy
-        if random.random() < self.epsilon:
-            # Explore: choose random action
-            possible_actions = self.get_possible_actions(app)
-            return random.choice(possible_actions) if possible_actions else None
-        else:
-            # Exploit: choose best action according to model
-            possible_actions = self.get_possible_actions(app)
-            if not possible_actions:
-                return None
+        # Exploit: choose best action according to model
+        possible_actions = self.get_possible_actions(app)
+        if not possible_actions:
+            return None
                 
-            best_action = None
-            best_value = float('-inf')
+        best_action = None
+        best_value = float('-inf')
             
-            # Set model to evaluation mode
-            self.model.eval()
+        # Set model to evaluation mode
+        self.model.eval()
             
-            with torch.no_grad():
-                for action in possible_actions:
-                    # Predict value of resulting state
-                    resulting_state = self.get_resulting_state(app, action)
-                    res_state_tensor = resulting_state[0]
-                    predicted_value = self.model(res_state_tensor).item()
+        with torch.no_grad():
+            for action in possible_actions:
+                # Predict value of resulting state
+                resulting_state = self.get_resulting_state(app, action)
+                res_state_tensor = resulting_state[0]
+                predicted_value = self.model(res_state_tensor).item()
                     
-                    if predicted_value > best_value:
-                        best_value = predicted_value
-                        best_action = action
+                if predicted_value > best_value:
+                    best_value = predicted_value
+                    best_action = action
             
-            return best_action
+        return best_action
     
     def get_resulting_state(self, app, action):
         # Simulate applying the action to get the resulting state
