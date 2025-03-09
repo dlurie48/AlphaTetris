@@ -3,7 +3,7 @@ import torch
 import os
 import time
 import matplotlib.pyplot as plt
-from config import GAME_CONFIG, STATE_FEATURES
+from configs import GAME_CONFIG, STATE_FEATURES
 
 def calculate_state_features(board, rows, cols, emptyColor):
     """
