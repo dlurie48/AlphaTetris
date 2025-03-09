@@ -27,29 +27,7 @@ class TetrisWithAI(App):
         self.statusTimer = 0
     
     def initTetrisGame(self):
-        # Get game dimensions
-        (self.rows, self.cols, self.cellSize, self.margin) = gameDimensions()
-        self.isGameOver = False
-        self.score = 0
-        
-        # Create board with all empty color
-        self.emptyColor = "blue"
-        self.board = [([self.emptyColor] * self.cols) for row in range(self.rows)]
-        
-        # Tetris pieces (copied from tetris_game.py)
-        iPiece = [[True, True, True, True]]
-        jPiece = [[True, False, False], [True, True, True]]
-        lPiece = [[False, False, True], [True, True, True]]
-        oPiece = [[True, True], [True, True]]
-        sPiece = [[False, True, True], [True, True, False]]
-        tPiece = [[False, True, False], [True, True, True]]
-        zPiece = [[True, True, False], [False, True, True]]
-        
-        self.tetrisPieces = [iPiece, jPiece, lPiece, oPiece, sPiece, tPiece, zPiece]
-        self.tetrisPieceColors = ["red", "yellow", "magenta", "pink", "cyan", "green", "orange"]
-        
-        # Start with new falling piece
-        newFallingPiece(self)
+        appStarted(self)
         
         # For AI training - tracking last state
         self.lastState = None
@@ -140,18 +118,18 @@ class TetrisWithAI(App):
         
         # Handle AI training
         if self.aiTraining:
-            self.runAITrainingStep()
+            self.executeAIMove(training = True)
             return
         
         # Handle AI gameplay
-        if self.aiMode and not self.isGameOver and not self.aiThinking:
+        elif self.aiMode and not self.isGameOver and not self.aiThinking:
             self.aiThinking = True
-            self.makeAIMove()
+            self.executeAIMove(training = False)
             self.aiThinking = False
             return
         
         # Regular game logic for human play
-        if not self.isGameOver and not self.aiMode:
+        elif not self.isGameOver and not self.aiMode:
             if not moveFallingPiece(self, 1, 0):
                 # If moving down is illegal, place piece and get a new one
                 placeFallingPiece(self)
@@ -159,59 +137,34 @@ class TetrisWithAI(App):
                 if not fallingPieceIsLegal(self, self.fallingPieceRow, self.fallingPieceCol):
                     self.isGameOver = True
     
-    def makeAIMove(self):
-        # Get current state representation
-        currentState = self.ai.get_state_representation(self)
-        
-        # Choose an action
-        action = self.ai.choose_action(self, currentState)
-        
-        if action is None:
-            self.isGameOver = True
-            return
-        
-        # Apply action
-        self.fallingPiece = action['piece']
-        self.fallingPieceRow = action['row']
-        self.fallingPieceCol = action['col']
-        
-        # Place the piece
-        placeFallingPiece(self)
-        
-        # Create new piece
-        newFallingPiece(self)
-        
-        # Check if game is over
-        if not fallingPieceIsLegal(self, self.fallingPieceRow, self.fallingPieceCol):
-            self.isGameOver = True
-    
-    def runAITrainingStep(self):
+    def executeAIMove(self, training=False):
         # Get current state
         currentState = self.ai.get_state_representation(self)
         
-        if self.lastState is not None:
-            # Calculate reward (score difference)
+        # For training mode, handle experience storage
+        if training and self.lastState is not None:
             reward = self.score - self.lastScore
-            
-            # Add experience to replay buffer
             done = self.isGameOver
-            self.ai.add_experience(self.lastState, self.lastAction, reward, currentState, done)
-            
-            # Train the model
+            self.ai.add_experience(self.lastState, self.lastAction, reward, 
+                                currentState, done)
             self.ai.train()
-        
-        # Save current state
-        self.lastState = currentState
-        self.lastScore = self.score
         
         # Choose action
         action = self.ai.choose_action(self, currentState)
-        self.lastAction = action
         
+        # For training mode, save current state
+        if training:
+            self.lastState = currentState
+            self.lastScore = self.score
+            self.lastAction = action
+        
+        # Handle game over or invalid action
         if action is None or self.isGameOver:
-            # Game over, start a new episode
-            self.aiEpisodes += 1
-            self.initTetrisGame()
+            if training:
+                self.aiEpisodes += 1
+                self.initTetrisGame()
+            else:
+                self.isGameOver = True
             return
         
         # Apply action
@@ -219,66 +172,122 @@ class TetrisWithAI(App):
         self.fallingPieceRow = action['row']
         self.fallingPieceCol = action['col']
         
-        # Place the piece
+        # Place the piece and get a new one
         placeFallingPiece(self)
-        
-        # Create new piece
         newFallingPiece(self)
         
         # Check if game is over
         if not fallingPieceIsLegal(self, self.fallingPieceRow, self.fallingPieceCol):
             self.isGameOver = True
+
+    def createInfoBox(self, canvas, x, y, width, height, title, textItems, titleFont="Arial 12 bold", textFont="Arial 10"):
+        """
+        Create a styled information box on the canvas with a title and multiple text items.
+        
+        Args:
+            canvas: The tkinter canvas to draw on
+            x, y: Top-left coordinates of the text (box will extend around this)
+            width, height: Dimensions of the box
+            title: Title text to display at the top
+            textItems: List of strings to display as separate lines
+            titleFont: Font specification for the title
+            textFont: Font specification for the text items
+        """
+        # Draw the background box with outline
+        canvas.create_rectangle(x - 10, y - 10, x + width, y + height, 
+                            fill="black", outline="white")
+        
+        # Draw the title
+        canvas.create_text(x, y, text=title, anchor="nw", fill="white", font=titleFont)
+        
+        # Draw each text item
+        for i, text in enumerate(textItems):
+            canvas.create_text(x, y + 25 + i*20, text=text, anchor="nw", 
+                            fill="white", font=textFont)
+
+    def createCenteredBox(self, canvas, centerX, centerY, width, height, title, textItems, 
+                        bgColor="black", titleColor="white", textColor="white", 
+                        titleFont="Arial 16 bold", textFont="Arial 12"):
+        """
+        Create a centered box with title and text items.
+        
+        Args:
+            canvas: The tkinter canvas to draw on
+            centerX, centerY: Center coordinates of the box
+            width, height: Dimensions of the box
+            title: Title text to display at the top
+            textItems: List of strings to display as separate lines
+            bgColor: Background color of the box
+            titleColor: Color of the title text
+            textColor: Color of the text items
+            titleFont: Font specification for the title
+            textFont: Font specification for the text items
+        """
+        # Draw the background box
+        canvas.create_rectangle(centerX - width//2, centerY - height//2,
+                            centerX + width//2, centerY + height//2,
+                            fill=bgColor, outline="white", width=2)
+        
+        # Draw the title
+        canvas.create_text(centerX, centerY - height//2 + 20, 
+                        text=title, fill=titleColor, font=titleFont)
+        
+        # Draw each text item
+        for i, text in enumerate(textItems):
+            canvas.create_text(centerX, centerY - height//2 + 60 + i*25, 
+                            text=text, fill=textColor, font=textFont)
+
+    def createStatusMessage(self, canvas, message):
+        """
+        Create a status message at the bottom of the screen.
+        
+        Args:
+            canvas: The tkinter canvas to draw on
+            message: The status message to display
+        """
+        if self.statusTimer <= 0:
+            return
+        
+        centerX = self.width // 2
+        bottom = self.height - 30
+        
+        canvas.create_rectangle(centerX - 250, bottom - 20,
+                            centerX + 250, bottom + 10,
+                            fill="black", outline="white")
+        
+        canvas.create_text(centerX, bottom - 5, 
+                        text=message, fill="white", font="Arial 10")
     
     def drawAIDebugInfo(self, canvas):
         if not self.showAIDebug:
             return
         
-        # Draw AI debug information
-        infoX = self.width - self.margin - 200
-        infoY = self.margin
+        # Prepare text items for the debug info
+        textItems = []
         
-        canvas.create_rectangle(infoX - 10, infoY - 10, 
-                               self.width - self.margin + 10, infoY + 200,
-                               fill="black", outline="white")
-        
-        # Show AI state
         modeText = "AI Mode" if self.aiMode else "Human Mode"
         trainingText = "TRAINING" if self.aiTraining else ""
-        canvas.create_text(infoX, infoY, text=f"{modeText} {trainingText}", 
-                         anchor="nw", fill="white", font="Arial 12 bold")
+        title = f"{modeText} {trainingText}"
         
         if self.aiTraining:
             trainingTime = time.time() - self.aiTrainingStart
-            canvas.create_text(infoX, infoY + 25, 
-                             text=f"Episodes: {self.aiEpisodes}", 
-                             anchor="nw", fill="white", font="Arial 10")
-            canvas.create_text(infoX, infoY + 45, 
-                             text=f"Training time: {trainingTime:.1f}s", 
-                             anchor="nw", fill="white", font="Arial 10")
+            textItems.append(f"Episodes: {self.aiEpisodes}")
+            textItems.append(f"Training time: {trainingTime:.1f}s")
         
         # Show memory usage
         if hasattr(self.ai, 'experience_buffer'):
-            canvas.create_text(infoX, infoY + 70, 
-                             text=f"Replay buffer: {len(self.ai.experience_buffer)}/{self.ai.buffer_size}", 
-                             anchor="nw", fill="white", font="Arial 10")
-    
+            textItems.append(f"Replay buffer: {len(self.ai.experience_buffer)}/{self.ai.buffer_size}")
+        
+        # Draw the info box
+        infoX = self.width - self.margin - 200
+        infoY = self.margin
+        self.createInfoBox(canvas, infoX, infoY, 200, 200, title, textItems)
+
     def drawOptions(self, canvas):
         if not self.showOptions:
             return
         
-        # Draw options menu
-        centerX = self.width // 2
-        centerY = self.height // 2
-        width = 300
-        height = 250
-        
-        canvas.create_rectangle(centerX - width//2, centerY - height//2,
-                              centerX + width//2, centerY + height//2,
-                              fill="black", outline="white", width=2)
-        
-        canvas.create_text(centerX, centerY - height//2 + 20, 
-                         text="OPTIONS", fill="white", font="Arial 16 bold")
-        
+        # Options menu content
         optionsText = [
             "A - Toggle AI Mode",
             "T - Start AI Training",
@@ -289,65 +298,54 @@ class TetrisWithAI(App):
             "O - Close Options"
         ]
         
-        for i, text in enumerate(optionsText):
-            canvas.create_text(centerX, centerY - height//2 + 60 + i*25, 
-                             text=text, fill="white", font="Arial 12")
-    
-    def drawStatusMessage(self, canvas):
-        if self.statusTimer <= 0:
-            return
-        
-        # Draw status message at the bottom of the screen
+        # Draw the centered options menu
         centerX = self.width // 2
-        bottom = self.height - 30
+        centerY = self.height // 2
+        self.createCenteredBox(canvas, centerX, centerY, 300, 250, "OPTIONS", optionsText)
+
+    def drawStatusMessage(self, canvas):
+        self.createStatusMessage(canvas, self.statusMessage)
         
-        canvas.create_rectangle(centerX - 250, bottom - 20,
-                              centerX + 250, bottom + 10,
-                              fill="black", outline="white")
-        
-        canvas.create_text(centerX, bottom - 5, 
-                         text=self.statusMessage, fill="white", font="Arial 10")
-    
     def redrawAll(self, canvas):
         # Draw the base Tetris game
         canvas.create_rectangle(0, 0, self.width, self.height, fill="black")
-        
+            
         # Draw the game area
         canvas.create_rectangle(self.margin - 5, self.margin - 5,
-                              self.margin + self.cols * self.cellSize + 5,
-                              self.margin + self.rows * self.cellSize + 5,
-                              fill="orange", width=2)
-        
+                                self.margin + self.cols * self.cellSize + 5,
+                                self.margin + self.rows * self.cellSize + 5,
+                                fill="orange", width=2)
+            
         # Draw the standard game elements
         drawBoard(self, canvas)
         drawFallingPiece(self, canvas)
-        
+            
         # Draw score
         scoreText = f"Score: {self.score}"
         canvas.create_text(self.margin, 10, text=scoreText,
-                         anchor="nw", fill="white", font="Arial 14 bold")
-        
+                        anchor="nw", fill="white", font="Arial 14 bold")
+            
         # Draw game over message if needed
         if self.isGameOver:
             centerX = self.margin + (self.cols * self.cellSize) // 2
             centerY = self.margin + (self.rows * self.cellSize) // 2
-            
+                
             canvas.create_rectangle(centerX - 100, centerY - 30,
-                                  centerX + 100, centerY + 30,
-                                  fill="black", outline="white", width=2)
-            
+                                    centerX + 100, centerY + 30,
+                                    fill="black", outline="white", width=2)
+                
             canvas.create_text(centerX, centerY,
-                             text="GAME OVER", fill="white", font="Arial 20 bold")
-            
+                                text="GAME OVER", fill="white", font="Arial 20 bold")
+                
             canvas.create_text(centerX, centerY + 25,
-                            text=f"Final Score: {self.score}", fill="white", font="Arial 12")
-        
+                                text=f"Final Score: {self.score}", fill="white", font="Arial 12")
+            
         # Draw AI debug info if enabled
         self.drawAIDebugInfo(canvas)
-        
+            
         # Draw options menu if active
         self.drawOptions(canvas)
-        
+            
         # Draw status message if active
         self.drawStatusMessage(canvas)
 
