@@ -32,8 +32,6 @@ def getBoardState(app):
     Returns a dictionary containing:
     - board_grid: current state of the board
     - current_piece: type of current piece
-    - hold_piece: type of held piece (or None)
-    - next_pieces: list of next pieces
     """
     # Create a numerical representation of the board
     # 0 for empty, 1 for filled
@@ -51,17 +49,9 @@ def getBoardState(app):
     currentPieceIndex = app.tetrisPieces.index(app.fallingPiece)
     currentPiece = currentPieceIndex
     
-    # Get next pieces (if implemented)
-    nextPieces = app.nextPieces if hasattr(app, 'nextPieces') else []
-    
-    # Get hold piece (if implemented)
-    holdPiece = app.holdPiece if hasattr(app, 'holdPiece') else None
-    
     return {
         'board_grid': boardGrid,
-        'current_piece': currentPiece,
-        'hold_piece': holdPiece,
-        'next_pieces': nextPieces
+        'current_piece': currentPiece
     }
 
 def getColumnHeights(app):
@@ -177,6 +167,10 @@ def executePlacement(app, col, rotation):
     hardDrop(app)
     placeFallingPiece(app)
     newFallingPiece(app)
+
+#################################################
+# Tetris Game
+#################################################
 
 #starts app with 
 def appStarted(app):
