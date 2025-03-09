@@ -5,10 +5,11 @@ import torch.optim as optim
 import random
 from collections import deque
 import copy
-from tetris_game import *  # Import your existing Tetris game
+from tetris_game import *
+from configs import GAME_CONFIGS
 
 class TetrisNet(nn.Module):
-    def __init__(self):
+    def __init__(self, rows, cols):
         super(TetrisNet, self).__init__()
         # CNN for processing the board state
         self.conv_layers = nn.Sequential(
@@ -21,7 +22,7 @@ class TetrisNet(nn.Module):
         
         # Fully connected layers for the output
         self.fc_layers = nn.Sequential(
-            nn.Linear(64 * 20 * 10, 128),  # Assuming 20x10 board after convolutions
+            nn.Linear(64 * rows * cols, 128),  # Assuming 20x10 board after convolutions
             nn.ReLU(),
             nn.Linear(128, 1)  # Single output for V-value
         )
@@ -33,6 +34,7 @@ class TetrisNet(nn.Module):
 class TetrisAI:
     def __init__(self):
         # Parameters
+        super(TetrisNet, self).__init__()
         self.buffer_size = 50000  # Experience replay buffer size
         self.batch_size = 512
         self.gamma = 0.99  # Discount factor
@@ -52,7 +54,7 @@ class TetrisAI:
         # This should include board state, current piece, and next pieces
         
         # Create a tensor representation of the board
-        board_tensor = torch.zeros((1, 1, 20, 10), device=self.device)
+        board_tensor = torch.zeros((1, 1, app.rows, app.cols), device=self.device)
         
         # Fill in board state - 1 for filled cells, 0 for empty
         for row in range(app.rows):

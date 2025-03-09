@@ -1,5 +1,6 @@
 import decimal
 from cmu_112_graphics import *
+from configs import GAME_CONFIG
 import copy
 import numpy as np
 import random
@@ -217,7 +218,8 @@ def appStarted(app):
 
 #set dimensions of board to create grid dimensions and size, app size, margins
 def gameDimensions():
-    return (25,15,25,20)
+    return (GAME_CONFIG['rows'], GAME_CONFIG['cols'], 
+            GAME_CONFIG['cellsize'], GAME_CONFIG['margin'])
 
 #starts new game with "r", moves piece with arrow keys, hard drops with space
 def keyPressed(app, event):
