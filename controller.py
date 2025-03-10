@@ -224,160 +224,209 @@ class TetrisWithAI(App):
         if not fallingPieceIsLegal(self, self.fallingPieceRow, self.fallingPieceCol):
             self.isGameOver = True
 
-    def createInfoBox(self, canvas, x, y, width, height, title, textItems, titleFont="Arial 12 bold", textFont="Arial 10"):
-        """
-        Create a styled information box on the canvas with a title and multiple text items.
-        """
-        # Draw the background box with outline
-        canvas.create_rectangle(x - 10, y - 10, x + width, y + height, 
-                            fill="black", outline="white")
+    def drawModeIndicator(self, canvas):
+        """Draw current mode indicator in the top-right corner"""
+        modeColors = {
+            "human_player": "green",
+            "ai_player_watching": "blue",
+            "ai_player_training": "red"
+        }
+        color = modeColors.get(self.gameMode, "purple")
         
-        # Draw the title
-        canvas.create_text(x, y, text=title, anchor="nw", fill="white", font=titleFont)
+        canvas.create_rectangle(
+            self.width - 120, 10, 
+            self.width - 10, 30, 
+            fill=color, width=1
+        )
         
-        # Draw each text item
-        for i, text in enumerate(textItems):
-            canvas.create_text(x, y + 25 + i*20, text=text, anchor="nw", 
-                            fill="white", font=textFont)
+        modeText = {
+            "human_player": "HUMAN",
+            "ai_player_watching": "AI WATCH",
+            "ai_player_training": "AI TRAIN"
+        }
+        text = modeText.get(self.gameMode, self.gameMode.upper())
+        
+        canvas.create_text(
+            self.width - 65, 20,
+            text=text, fill="white", font="Arial 12 bold"
+        )
 
-    def createCenteredBox(self, canvas, centerX, centerY, width, height, title, textItems, 
-                        bgColor="black", titleColor="white", textColor="white", 
-                        titleFont="Arial 16 bold", textFont="Arial 12"):
-        """
-        Create a centered box with title and text items.
-        """
-        # Draw the background box
-        canvas.create_rectangle(centerX - width//2, centerY - height//2,
-                            centerX + width//2, centerY + height//2,
-                            fill=bgColor, outline="white", width=2)
+    def drawTrainingInfo(self, canvas):
+        """Draw AI training information for AI modes"""
+        if self.gameMode not in ["ai_player_watching", "ai_player_training"]:
+            return
+            
+        trainingTime = time.time() - self.aiTrainingStart if self.aiTrainingStart else 0
+        hours, remainder = divmod(trainingTime, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        timeStr = f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}"
         
-        # Draw the title
-        canvas.create_text(centerX, centerY - height//2 + 20, 
-                        text=title, fill=titleColor, font=titleFont)
+        # Draw training info in bottom-right area
+        infoX = self.width - 150
+        infoY = self.height - 80
         
-        # Draw each text item
-        for i, text in enumerate(textItems):
-            canvas.create_text(centerX, centerY - height//2 + 60 + i*25, 
-                            text=text, fill=textColor, font=textFont)
-
-    def createStatusMessage(self, canvas, message):
-        """
-        Create a status message at the bottom of the screen.
-        """
+        canvas.create_rectangle(
+            infoX - 10, infoY - 10,
+            self.width - 10, self.height - 10,
+            fill="black", outline="gray"
+        )
+        
+        canvas.create_text(
+            infoX, infoY,
+            text=f"Episodes: {self.aiEpisodes}", 
+            anchor="nw", fill="white", font="Arial 10"
+        )
+        
+        canvas.create_text(
+            infoX, infoY + 20,
+            text=f"Time: {timeStr}", 
+            anchor="nw", fill="white", font="Arial 10"
+        )
+    
+    def drawStatusMessage(self, canvas):
+        """Draw temporary status message at the bottom of the screen"""
         if self.statusTimer <= 0:
             return
         
-        centerX = self.width // 2
-        bottom = self.height - 30
+        # Opacity effect based on remaining time
+        alpha = min(1.0, self.statusTimer / 1000)
+        fillColor = f"#{int(0 * alpha):02x}{int(0 * alpha):02x}{int(0 * alpha):02x}"
+        textColor = f"#{int(255 * alpha):02x}{int(255 * alpha):02x}{int(255 * alpha):02x}"
         
-        canvas.create_rectangle(centerX - 250, bottom - 20,
-                            centerX + 250, bottom + 10,
-                            fill="black", outline="white")
+        msgY = self.height - 40
+        canvas.create_rectangle(
+            20, msgY - 15,
+            self.width - 180, msgY + 15,
+            fill=fillColor, outline=f"#{int(100 * alpha):02x}{int(100 * alpha):02x}{int(100 * alpha):02x}"
+        )
         
-        canvas.create_text(centerX, bottom - 5, 
-                        text=message, fill="white", font="Arial 10")
-    
-    def drawAIDebugInfo(self, canvas):
-        """Draw AI debug information on the canvas"""
-        if not self.showAIDebug:
-            return
-        
-        # Prepare text items for the debug info
-        textItems = []
-        
-        title = f"Mode: {self.gameMode}"
-        
-        if self.gameMode in ["ai_player_training", "ai_player_watching"]:
-            trainingTime = time.time() - self.aiTrainingStart
-            textItems.append(f"Episodes: {self.aiEpisodes}")
-            textItems.append(f"Training time: {trainingTime:.1f}s")
-        
-        # Show memory usage
-        if hasattr(self.ai, 'experience_buffer'):
-            textItems.append(f"Replay buffer: {len(self.ai.experience_buffer)}/{self.ai.buffer_size}")
-        
-        # Draw the info box
-        infoX = self.width - self.margin - 200
-        infoY = self.margin
-        self.createInfoBox(canvas, infoX, infoY, 200, 200, title, textItems)
+        canvas.create_text(
+            self.width // 2 - 80, msgY,
+            text=self.statusMessage, fill=textColor, font="Arial 10"
+        )
 
     def drawOptions(self, canvas):
-        """Draw options menu on the canvas"""
+        """Draw options menu overlay"""
         if not self.showOptions:
             return
         
-        # Options menu content
-        optionsText = [
-            "M - Cycle Game Modes",
+        # Semi-transparent background
+        canvas.create_rectangle(
+            0, 0, self.width, self.height,
+            fill="#white", stipple="gray50"
+        )
+        
+        # Options box
+        centerX = self.width // 2
+        centerY = self.height // 2
+        boxWidth = 250
+        boxHeight = 180
+        
+        canvas.create_rectangle(
+            centerX - boxWidth//2, centerY - boxHeight//2,
+            centerX + boxWidth//2, centerY + boxHeight//2,
+            fill="black", outline="white", width=2
+        )
+        
+        # Title
+        canvas.create_text(
+            centerX, centerY - boxHeight//2 + 20,
+            text="OPTIONS", fill="white", font="Arial 14 bold"
+        )
+        
+        # Options
+        options = [
+            "M - Change Mode",
             "R - Reset Game",
             "L - Load AI Model",
             "P - Save AI Model",
-            "D - Toggle AI Debug Info",
             "O - Close Options"
         ]
         
-        # Draw the centered options menu
+        for i, text in enumerate(options):
+            canvas.create_text(
+                centerX, centerY - boxHeight//4 + i*25,
+                text=text, fill="white", font="Arial 12"
+            )
+    
+    def drawTrainingOnlyScreen(self, canvas):
+        """Draw the simplified training-only screen"""
+        canvas.create_rectangle(0, 0, self.width, self.height, fill="black")
+        
+        trainingTime = time.time() - self.aiTrainingStart if self.aiTrainingStart else 0
+        hours, remainder = divmod(trainingTime, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        timeStr = f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}"
+        
         centerX = self.width // 2
         centerY = self.height // 2
-        self.createCenteredBox(canvas, centerX, centerY, 300, 250, "OPTIONS", optionsText)
-
-    def drawStatusMessage(self, canvas):
-        """Draw status message on the canvas"""
-        self.createStatusMessage(canvas, self.statusMessage)
         
+        # Training status
+        canvas.create_text(
+            centerX, centerY - 40,
+            text="AI TRAINING IN PROGRESS",
+            fill="yellow", font="Arial 16 bold"
+        )
+        
+        # Stats
+        canvas.create_text(
+            centerX, centerY,
+            text=f"Episodes: {self.aiEpisodes}",
+            fill="white", font="Arial 14"
+        )
+        
+        canvas.create_text(
+            centerX, centerY + 30,
+            text=f"Training Time: {timeStr}",
+            fill="white", font="Arial 14"
+        )
+        
+        # Controls reminder
+        canvas.create_text(
+            centerX, centerY + 80,
+            text="Press 'M' to change mode",
+            fill="white", font="Arial 12"
+        )
+        
+        # Mode indicator
+        self.drawModeIndicator(canvas)
+    
     def redrawAll(self, canvas):
-        # Always draw the current mode at the top for visibility
-        modeText = f"CURRENT MODE: {self.gameMode.upper()}"
-        canvas.create_rectangle(0, 0, self.width, 30, fill="purple")
-        canvas.create_text(self.width // 2, 15, 
-                          text=modeText, fill="white", font="Arial 14 bold")
-        
-        # Skip detailed drawing for fast training mode
+        # For fast training mode, show minimal UI
         if self.gameMode == "ai_player_training":
-            # Only draw minimal info
-            canvas.create_rectangle(0, 30, self.width, self.height, fill="black")
-            
-            trainingTime = time.time() - self.aiTrainingStart if self.aiTrainingStart else 0
-            infoText = [
-                f"AI Training Mode (Fast)",
-                f"Episodes: {self.aiEpisodes}",
-                f"Training time: {trainingTime:.1f}s",
-                f"Press 'M' to change mode"
-            ]
-            
-            # Draw centered info
-            centerX = self.width // 2
-            centerY = self.height // 2
-            self.createCenteredBox(canvas, centerX, centerY, 300, 200, "TRAINING IN PROGRESS", infoText)
+            self.drawTrainingOnlyScreen(canvas)
             return
         
-        # For human and watching modes, we use the drawing functions from tetris_game.py
-        canvas.create_rectangle(0, 30, self.width, self.height, fill="black")
+        # For human and watching modes, draw the standard game
+        canvas.create_rectangle(0, 0, self.width, self.height, fill="black")
         
-        # Draw the game board using functions from tetris_game.py
+        # Draw the standard game elements
         drawBoard(self, canvas)
         drawFallingPiece(self, canvas)
+        
+        # Draw mode indicator
+        self.drawModeIndicator(canvas)
+        
+        # Draw score (using the function from tetris_game.py)
+        writeScore(self, canvas)
         
         # Add game over message if needed
         if self.isGameOver:
             writeGameOver(self, canvas)
         
-        # Draw score using function from tetris_game.py
-        writeScore(self, canvas)
-            
-        # Draw AI debug info if enabled
-        self.drawAIDebugInfo(canvas)
-            
-        # Draw options menu if active
-        self.drawOptions(canvas)
-            
+        # Draw AI training info (for AI modes)
+        self.drawTrainingInfo(canvas)
+        
         # Draw status message if active
         self.drawStatusMessage(canvas)
+        
+        # Draw options menu if active (this is an overlay)
+        self.drawOptions(canvas)
 
 def runTetrisWithAI():
     # Use the dimensions from tetris_game.py
     rows, cols, cellSize, margin = gameDimensions()
-    game = TetrisWithAI(width=cols*cellSize+2*margin, height=rows*cellSize+4*margin)
+    game = TetrisWithAI(width=cols*cellSize+2*margin, height=rows*cellSize+2*margin)
 
 if __name__ == "__main__":
     runTetrisWithAI()
