@@ -220,46 +220,30 @@ class TetrisAI:
         return best_action
     
     def get_resulting_state(self, app, action):
-        """Simulate action to get resulting state, reward, and game over status"""
+        # Simulate applying the action to get the resulting state
+        # Create a deep copy of the app
         app_copy = copy.deepcopy(app)
-        
-        # Handle hold piece action
-        if action['piece_source'] == 'hold':
-            if app_copy.holdPiece is None:
-                # First time holding - store current piece
-                app_copy.holdPiece = app_copy.fallingPiece
-                app_copy.holdPieceColor = app_copy.fallingPieceColor
-                newFallingPiece(app_copy)
-            else:
-                # Swap pieces
-                temp = (app_copy.holdPiece, app_copy.holdPieceColor)
-                app_copy.holdPiece, app_copy.holdPieceColor = app_copy.fallingPiece, app_copy.fallingPieceColor
-                app_copy.fallingPiece, app_copy.fallingPieceColor = temp
-            
-            app_copy.holdPieceUsed = True
         
         # Apply the action
         app_copy.fallingPiece = action['piece']
         app_copy.fallingPieceRow = action['row']
         app_copy.fallingPieceCol = action['col']
         
-        # Place piece and calculate reward
+        # Place the piece
         original_score = app_copy.score
         placeFallingPiece(app_copy)
-        reward = app_copy.score - original_score
         
-        # Get new piece if not a hold action
-        if action['piece_source'] == 'current':
-            newFallingPiece(app_copy)
+        # Calculate raw score change
+        score_change = app_copy.score - original_score
         
-        # Check for game over
-        is_game_over = not fallingPieceIsLegal(app_copy, app_copy.fallingPieceRow, app_copy.fallingPieceCol)
-        app_copy.isGameOver = is_game_over
+        # Calculate shaped reward
+        reward = self.calculate_shaped_reward(app_copy, action, score_change)
         
-        # Get final state representation
+        # Get the state representation
         state_representation = self.get_state_representation(app_copy)
         
-        return state_representation, reward, is_game_over
+        return state_representation, reward, app_copy.isGameOver
+
     
     def add_experience(self, state, action, reward, next_state, done):
         """Add experience to replay buffer"""

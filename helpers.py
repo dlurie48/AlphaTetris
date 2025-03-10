@@ -63,6 +63,60 @@ def calculate_state_features(board, rows, cols, emptyColor):
     
     return features
 
+def calculate_shaped_reward(self, app, action, score_change):
+    """
+    Calculate a shaped reward based on board state changes after applying an action.
+    
+    Args:
+        app: The game state after the action is applied
+        action: The action that was taken
+        score_change: The raw score change from the action
+    
+    Returns:
+        float: The shaped reward value
+    """
+    from helpers import calculate_state_features
+    
+    # We need to know the state before the action was taken
+    # Since we already executed the action, we'll need to reconstruct the previous state
+    # This is a simplification - ideally we would store the previous state features
+    
+    # Calculate features of the current state
+    current_features = calculate_state_features(app.board, app.rows, app.cols, app.emptyColor)
+    
+    # Basic reward from score
+    total_reward = score_change
+    
+    # 1. Penalty for holes - critical for good stacking
+    holes = current_features['holes']
+    total_reward -= 0.5 * holes
+    
+    # 2. Penalty for bumpiness - encourages flat surfaces
+    bumpiness = current_features['bumpiness']
+    total_reward -= 0.2 * bumpiness
+    
+    # 3. Reward for completed lines (already included in score_change, but we can emphasize it)
+    complete_lines = current_features['complete_lines']
+    if complete_lines > 0:
+        # Bonus for multiple line clears
+        if complete_lines == 4:  # Tetris
+            total_reward += 4.0  # Extra bonus for Tetris
+        elif complete_lines > 1:
+            total_reward += 0.5 * complete_lines  # Small bonus for multi-line clear
+    
+    # 4. Penalty for height - discourages building too high
+    max_height = current_features['max_height']
+    # Progressive penalty that gets worse as the stack gets higher
+    height_penalty = 0.01 * max_height if max_height < 10 else 0.1 * max_height
+    total_reward -= height_penalty
+    
+    # 5. Check if hold piece was used in this action
+    # This requires tracking in the controller class, but we can add a simple
+    # incentive based on the action type if that information is available
+    # For now we'll rely on the controller to add this bonus
+    
+    return total_reward
+
 def plot_training_progress(episodes, scores, avg_scores, losses=None, filename=None):
     """
     Plot and save training progress metrics.

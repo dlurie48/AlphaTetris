@@ -11,7 +11,7 @@ class TetrisWithAI(App):
         self.initTetrisGame()
         
         # Game modes: "human_player", "ai_player_training", "ai_player_watching"
-        self.gameMode = "human_player"
+        self.gameMode = "ai_player_watching"
         
         # AI settings
         self.ai = TetrisAI()
@@ -253,9 +253,16 @@ class TetrisWithAI(App):
         if self.lastState is not None:
             reward = self.score - self.lastScore
             done = self.isGameOver
+
+            holdpiece_used = self.holdPieceUsed and not self.lastHoldPieceUsed
+            if holdpiece_used:
+                reward += 0.5  # Small bonus for using holdpiece
+
             self.ai.add_experience(self.lastState, self.lastAction, reward, 
                                 currentState, done)
             self.ai.train()
+        
+        self.lastHoldPieceUsed = self.holdPieceUsed
             
         # Get all possible actions directly rather than using AI's choose_action method
         # to avoid the deepcopy operation that causes problems
