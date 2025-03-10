@@ -272,6 +272,9 @@ class TetrisWithAI(App):
             self.ai.add_experience(self.lastState, self.lastAction, 
                                   reward, current_state, terminal)
             
+            if reward != 0 and not batch_mode:
+                print(f"Got reward: {reward}, total episode reward: {self.currentEpisodeReward}")
+            
             # Train the model
             loss = self.ai.train()
             if loss is not None:

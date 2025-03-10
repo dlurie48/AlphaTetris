@@ -6,7 +6,7 @@ import random
 from collections import deque
 from tetris_game import *
 from configs import GAME_CONFIG
-from helpers import ExperienceBuffer
+from helpers import *
 
 class TetrisNet(nn.Module):
     def __init__(self):
@@ -198,6 +198,11 @@ class TetrisAI:
         
         # Calculate reward as score difference
         reward = app_copy.score - app.score
+
+        if not app.isGameOver:
+                reward += 0.01
+
+        #reward = calculate_shaped_reward(self, app, action, score_change)
         
         # Create new piece to check if game is over
         newFallingPiece(app_copy)
