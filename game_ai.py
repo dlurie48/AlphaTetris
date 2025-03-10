@@ -3,10 +3,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import random
-from collections import deque
 from tetris_game import *
-from configs import GAME_CONFIG
-from helpers import *
+from configs import GAME_CONFIG, AI_CONFIG, REWARDS
+from helpers import calculate_state_features, ExperienceBuffer
 
 class TetrisNet(nn.Module):
     def __init__(self):
@@ -30,8 +29,9 @@ class TetrisNet(nn.Module):
         )
         
         # Combined processing
+        conv_output_size = 64 * rows * cols
         self.fc_layers = nn.Sequential(
-            nn.Linear(64 * rows * cols + 32, 128),
+            nn.Linear(conv_output_size + 32, 128),
             nn.ReLU(),
             nn.Linear(128, 1)  # Single output for V-value
         )
@@ -44,25 +44,28 @@ class TetrisNet(nn.Module):
 
 class TetrisAI:
     def __init__(self):
-        # Parameters
-        self.buffer_size = 50000
-        self.batch_size = 512
-        self.gamma = 0.99
-        self.epsilon = 0.05
-        self.epsilon_decay = 0.999
-        self.epsilon_min = 0.01
+        # Parameters from config
+        self.buffer_size = AI_CONFIG['buffer_size']
+        self.batch_size = AI_CONFIG['batch_size']
+        self.gamma = AI_CONFIG['gamma']
+        self.epsilon = AI_CONFIG['epsilon']
+        self.epsilon_decay = AI_CONFIG['epsilon_decay']
+        self.epsilon_min = AI_CONFIG['epsilon_min']
         
         # Device configuration
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         # Create the neural network model
         self.model = TetrisNet().to(self.device)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=AI_CONFIG['learning_rate'])
         self.loss_fn = nn.HuberLoss()
         
-        # More efficient experience buffer
-        state_shape = (1, GAME_CONFIG['rows'], GAME_CONFIG['cols'])
-        self.experience_buffer = ExperienceBuffer(self.buffer_size, state_shape, self.device)
+        # Experience buffer setup - consistent state shape format
+        self.experience_buffer = ExperienceBuffer(
+            self.buffer_size, 
+            (1, 1, GAME_CONFIG['rows'], GAME_CONFIG['cols']),
+            self.device
+        )
     
     def get_state_representation(self, app):
         """Convert game state to tensor representation for neural network input"""
@@ -79,14 +82,14 @@ class TetrisAI:
         
         # Current piece
         for i, piece in enumerate(app.tetrisPieces):
-            if piece == app.fallingPiece:
+            if app.fallingPiece and np.array_equal(piece, app.fallingPiece):
                 piece_features[0, 0] = i + 1  # Add 1 to distinguish from 0 (no piece)
                 break
         
         # Hold piece
         if app.holdPiece is not None:
             for i, piece in enumerate(app.tetrisPieces):
-                if piece == app.holdPiece:
+                if np.array_equal(piece, app.holdPiece):
                     piece_features[0, 1] = i + 1
                     break
         
@@ -95,14 +98,14 @@ class TetrisAI:
             if i < len(app.nextPiecesIndices):
                 piece_features[0, i+2] = app.nextPiecesIndices[i] + 1
         
-        return board_tensor, piece_features
+        return (board_tensor, piece_features)
     
     def get_possible_actions(self, app):
         """Generate all valid final placements for the current piece"""
         possible_actions = []
         
         # Store original piece state
-        original_piece = app.fallingPiece.copy() if app.fallingPiece else None
+        original_piece = [row[:] for row in app.fallingPiece]
         original_row = app.fallingPieceRow
         original_col = app.fallingPieceCol
         
@@ -116,7 +119,7 @@ class TetrisAI:
         # Try all rotations
         for rotation in range(max_rotations):
             # Reset to original piece
-            app.fallingPiece = original_piece.copy()
+            app.fallingPiece = [row[:] for row in original_piece]
             app.fallingPieceRow = 0
             app.fallingPieceCol = app.cols // 2
             
@@ -168,50 +171,98 @@ class TetrisAI:
         
         return possible_actions
     
+    def _rotate_piece(self, piece):
+        """Helper to rotate a piece, copied from tetris_game.py _rotatePieceWithoutChecking"""
+        oldNumRows = len(piece)
+        oldNumCols = len(piece[0])
+        newNumRows, newNumCols = oldNumCols, oldNumRows
+        
+        rotated = [([None] * newNumCols) for row in range(newNumRows)]
+        i = 0
+        for col in range(oldNumCols - 1, -1, -1):
+            j = 0
+            for row in range(oldNumRows):
+                rotated[i][j] = piece[row][col]
+                j += 1
+            i += 1
+        
+        return rotated
+    
+    def calculate_shaped_reward(self, app, app_copy, score_change):
+        """Calculate a shaped reward based on board state changes using helpers"""
+        # Get features from current and resulting states
+        current_features = calculate_state_features(app.board, app.rows, app.cols, app.emptyColor)
+        next_features = calculate_state_features(app_copy.board, app_copy.rows, app_copy.cols, app_copy.emptyColor)
+        
+        # Base reward from score
+        reward = score_change
+        
+        # Living bonus - small reward for each move that doesn't end the game
+        if not app_copy.isGameOver:
+            reward += 0.1
+        
+        # Penalty for holes created (key factor in Tetris)
+        holes_created = next_features['holes'] - current_features['holes']
+        if holes_created > 0:
+            reward -= REWARDS['hole_created'] * holes_created
+        
+        # Penalty for height (discourages building too high)
+        reward -= REWARDS['height_penalty'] * next_features['max_height']
+        
+        # Game over penalty
+        if app_copy.isGameOver:
+            reward += REWARDS['game_over']
+        
+        return reward
+    
     def get_resulting_state(self, app, action):
-        """Simulate applying an action and return resulting state without modifying original state"""
-        # Create shallow copy of the app with deep copy of critical attributes
+        """Simulate applying an action and return resulting state"""
+        # Create a minimal app copy with only essential attributes to avoid deepcopy issues
         app_copy = type('AppCopy', (), {})()
         
-        # Copy essential attributes
+        # Copy only essential attributes (avoiding tkinter objects)
         app_copy.rows = app.rows
         app_copy.cols = app.cols
         app_copy.emptyColor = app.emptyColor
-        app_copy.board = [row[:] for row in app.board]  # Deep copy of board
+        app_copy.board = [row[:] for row in app.board]  # Deep copy board
         app_copy.score = app.score
-        app_copy.tetrisPieces = app.tetrisPieces
-        app_copy.tetrisPieceColors = app.tetrisPieceColors
+        app_copy.tetrisPieces = app.tetrisPieces  # Reference is fine, pieces don't change
+        app_copy.tetrisPieceColors = app.tetrisPieceColors  # Reference is fine
+        app_copy.isGameOver = False
         
-        # Copy piece state
-        app_copy.fallingPiece = [row[:] for row in action['piece']]
+        # Set piece state from action
+        app_copy.fallingPiece = [row[:] for row in action['piece']]  # Deep copy the piece
         app_copy.fallingPieceRow = action['row']
         app_copy.fallingPieceCol = action['col']
         app_copy.fallingPieceColor = app.fallingPieceColor
         
-        # Copy hold and next pieces for complete state representation
-        app_copy.holdPiece = app.holdPiece.copy() if app.holdPiece else None
+        # Copy hold and next pieces safely
+        if app.holdPiece is not None:
+            app_copy.holdPiece = [row[:] for row in app.holdPiece]
+        else:
+            app_copy.holdPiece = None
         app_copy.holdPieceColor = app.holdPieceColor
         app_copy.nextPiecesIndices = app.nextPiecesIndices[:]
         
-        # Place the piece on the board
+        # Simulate placing the piece
+        original_score = app_copy.score
         placeFallingPiece(app_copy)
+        score_change = app_copy.score - original_score
         
-        # Calculate reward as score difference
-        reward = app_copy.score - app.score
-
-        if not app.isGameOver:
-                reward += 0.01
-
-        #reward = calculate_shaped_reward(self, app, action, score_change)
+        # Calculate shaped reward
+        reward = self.calculate_shaped_reward(app, app_copy, score_change)
         
-        # Create new piece to check if game is over
+        # Simulate getting a new piece to check game over
         newFallingPiece(app_copy)
         is_terminal = not fallingPieceIsLegal(app_copy, app_copy.fallingPieceRow, app_copy.fallingPieceCol)
+        if is_terminal:
+            app_copy.isGameOver = True
+            reward += REWARDS['game_over']  # Add game over penalty
         
         # Get state representation of resulting state
-        state_representation = self.get_state_representation(app_copy)
+        next_state = self.get_state_representation(app_copy)
         
-        return state_representation, reward, is_terminal
+        return next_state, reward, is_terminal
     
     def choose_action(self, app):
         """Choose action using epsilon-greedy policy"""
@@ -233,13 +284,19 @@ class TetrisAI:
         
         with torch.no_grad():
             for action in possible_actions:
-                # Predict value of resulting state
-                resulting_state = self.get_resulting_state(app, action)
-                board_state, piece_features = resulting_state[0]
-                predicted_value = self.model(board_state, piece_features).item()
+                # Get the resulting state from taking this action
+                next_state, reward, is_terminal = self.get_resulting_state(app, action)
+                board_tensor, piece_features = next_state
                 
-                if predicted_value > best_value:
-                    best_value = predicted_value
+                # Calculate Q-value: immediate reward + discounted future value
+                future_value = 0.0
+                if not is_terminal:
+                    future_value = self.model(board_tensor, piece_features).item()
+                    
+                q_value = reward + self.gamma * future_value
+                
+                if q_value > best_value:
+                    best_value = q_value
                     best_action = action
         
         # Decay epsilon
@@ -249,40 +306,60 @@ class TetrisAI:
     
     def add_experience(self, state, action, reward, next_state, done):
         """Add experience to replay buffer"""
-        self.experience_buffer.add(state[0], action, reward, next_state[0], done)
+        board_state, piece_features = state
+        next_board_state, next_piece_features = next_state
+        
+        # Store the experience
+        self.experience_buffer.add(board_state, action, reward, next_board_state, done)
     
     def train(self):
         """Sample batch from experience buffer and train model"""
         if len(self.experience_buffer) < self.batch_size:
-            return 0
+            return None
         
         # Sample random batch
-        states, actions, rewards, next_states, dones = self.experience_buffer.sample(self.batch_size)
+        board_states, actions, rewards, next_board_states, dones = self.experience_buffer.sample(self.batch_size)
         
-        # Get board states and piece features
-        board_states = [state[0] for state in states]
-        piece_features = [state[1] for state in states]
-        next_board_states = [state[0] for state in next_states]
-        next_piece_features = [state[1] for state in next_states]
+        # Convert rewards and dones to tensors if they aren't already
+        rewards = torch.tensor(rewards, device=self.device) if not isinstance(rewards, torch.Tensor) else rewards
+        dones = torch.tensor(dones, device=self.device) if not isinstance(dones, torch.Tensor) else dones
         
-        # Convert to tensors
-        board_states = torch.cat(board_states)
-        piece_features = torch.cat(piece_features)
-        rewards = torch.tensor(rewards, device=self.device)
-        next_board_states = torch.cat(next_board_states)
-        next_piece_features = torch.cat(next_piece_features)
-        dones = torch.tensor(dones, dtype=torch.bool, device=self.device)
-        
-        # Compute targets
+        # Compute targets (Bellman equation)
         with torch.no_grad():
-            next_values = self.model(next_board_states, next_piece_features).squeeze()
-            # Zero out values for terminal states
-            next_values[dones] = 0.0
+            # For each next state, get its predicted value
+            next_values = torch.zeros_like(rewards)
+            
+            # Process in smaller batches to avoid memory issues
+            batch_size = 32
+            for i in range(0, len(next_board_states), batch_size):
+                end = min(i + batch_size, len(next_board_states))
+                batch_indices = list(range(i, end))
+                
+                # Get piece features for this batch
+                next_piece_features_batch = torch.zeros((len(batch_indices), 7), device=self.device)
+                for j, idx in enumerate(batch_indices):
+                    action = actions[idx]
+                    # Extract piece features from the action if available
+                    if 'piece_features' in action:
+                        next_piece_features_batch[j] = action['piece_features']
+                
+                # Get values for non-terminal states
+                batch_values = self.model(next_board_states[batch_indices], next_piece_features_batch).squeeze()
+                for j, idx in enumerate(batch_indices):
+                    if not dones[idx]:
+                        next_values[idx] = batch_values[j]
+            
+            # Compute target values using the Bellman equation
             targets = rewards + self.gamma * next_values
         
-        # Compute predictions
+        # Compute current value predictions
         self.model.train()
-        predictions = self.model(board_states, piece_features).squeeze()
+        piece_features_batch = torch.zeros((len(board_states), 7), device=self.device)
+        for i, action in enumerate(actions):
+            if 'piece_features' in action:
+                piece_features_batch[i] = action['piece_features']
+                
+        predictions = self.model(board_states, piece_features_batch).squeeze()
         
         # Compute loss and update
         loss = self.loss_fn(predictions, targets)
@@ -293,8 +370,17 @@ class TetrisAI:
         return loss.item()
     
     def save_model(self, filename):
-        torch.save(self.model.state_dict(), filename)
+        """Save the model to a file"""
+        torch.save({
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'epsilon': self.epsilon
+        }, filename)
     
     def load_model(self, filename):
-        self.model.load_state_dict(torch.load(filename))
+        """Load the model from a file"""
+        checkpoint = torch.load(filename)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.epsilon = checkpoint.get('epsilon', self.epsilon)
         self.model.eval()

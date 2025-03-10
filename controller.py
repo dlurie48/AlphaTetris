@@ -295,7 +295,7 @@ class TetrisWithAI(App):
             return
         
         # Apply action
-        self.fallingPiece = [row[:] for row in action['piece']]
+        self.fallingPiece = action['piece']
         self.fallingPieceRow = action['row']
         self.fallingPieceCol = action['col']
         
