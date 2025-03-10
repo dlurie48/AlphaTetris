@@ -35,6 +35,23 @@ class TetrisWithAI(App):
         self.lastState = None
         self.lastAction = None
         self.lastScore = 0
+        
+        # Ensure hold piece and next pieces features are initialized
+        if not hasattr(self, 'holdPiece'):
+            self.holdPiece = None
+            self.holdPieceColor = None
+            self.holdPieceUsed = False
+        
+        if not hasattr(self, 'nextPiecesIndices'):
+            self.nextPiecesIndices = []
+            for _ in range(4):
+                self.nextPiecesIndices.append(random.randint(0, len(self.tetrisPieces) - 1))
+        
+        # Initialize pane dimensions for hold and next pieces display
+        self.holdPaneWidth = 6 * self.cellSize
+        self.holdPaneHeight = 6 * self.cellSize
+        self.nextPaneWidth = 6 * self.cellSize
+        self.nextPaneHeight = 20 * self.cellSize
     
     def keyPressed(self, event):
         # Debugging output to console
@@ -80,6 +97,55 @@ class TetrisWithAI(App):
                 newFallingPiece(self)
                 if not fallingPieceIsLegal(self, self.fallingPieceRow, self.fallingPieceCol):
                     self.isGameOver = True
+            elif event.key.lower() == "c":  # Hold piece (using 'c' key)
+                self.holdCurrentPiece()
+    
+    def holdCurrentPiece(self):
+        # Only allow holding once per piece
+        if self.holdPieceUsed:
+            return
+        
+        # Get current piece index
+        currentPieceIndex = -1
+        for i, piece in enumerate(self.tetrisPieces):
+            if piece == self.fallingPiece:
+                currentPieceIndex = i
+                break
+        
+        if currentPieceIndex == -1:
+            return  # Shouldn't happen if pieces are properly set up
+        
+        # If no piece is being held, swap with the next piece
+        if self.holdPiece is None:
+            self.holdPiece = self.tetrisPieces[currentPieceIndex]
+            self.holdPieceColor = self.tetrisPieceColors[currentPieceIndex]
+            newFallingPiece(self)
+        else:
+            # Swap the current piece with the hold piece
+            tempPiece = self.holdPiece
+            tempColor = self.holdPieceColor
+            
+            self.holdPiece = self.tetrisPieces[currentPieceIndex]
+            self.holdPieceColor = self.tetrisPieceColors[currentPieceIndex]
+            
+            # Get the index of the hold piece
+            holdPieceIndex = -1
+            for i, piece in enumerate(self.tetrisPieces):
+                if piece == tempPiece:
+                    holdPieceIndex = i
+                    break
+            
+            if holdPieceIndex != -1:
+                self.fallingPiece = self.tetrisPieces[holdPieceIndex]
+                self.fallingPieceColor = self.tetrisPieceColors[holdPieceIndex]
+                
+                # Reset position
+                self.fallingPieceRow = 0
+                numFallingPieceCols = len(self.fallingPiece[0])
+                self.fallingPieceCol = self.cols // 2 - numFallingPieceCols // 2
+        
+        # Mark that hold has been used for this piece
+        self.holdPieceUsed = True
     
     def cycleGameMode(self):
         """Cycle through game modes: human_player -> ai_player_watching -> ai_player_training -> human_player"""
@@ -223,6 +289,82 @@ class TetrisWithAI(App):
         # Check if game is over
         if not fallingPieceIsLegal(self, self.fallingPieceRow, self.fallingPieceCol):
             self.isGameOver = True
+    
+    # Draw the hold piece panel
+    def drawHoldPane(self, canvas):
+        # Draw hold panel background
+        holdLeftMargin = self.margin
+        holdTopMargin = self.margin
+        
+        # Draw hold panel border
+        canvas.create_rectangle(holdLeftMargin, holdTopMargin,
+                                holdLeftMargin + self.holdPaneWidth,
+                                holdTopMargin + self.holdPaneHeight,
+                                fill="black", width=2, outline="white")
+        
+        # Draw "HOLD" text
+        canvas.create_text(holdLeftMargin + self.holdPaneWidth // 2,
+                          holdTopMargin + 20,
+                          text="HOLD", fill="white",
+                          font="Arial 16 bold")
+        
+        # Draw the hold piece if it exists
+        if self.holdPiece is not None:
+            # Center the piece in the hold panel
+            pieceRows = len(self.holdPiece)
+            pieceCols = len(self.holdPiece[0])
+            centerRow = (self.holdPaneHeight - pieceRows * self.cellSize) // 2
+            centerCol = (self.holdPaneWidth - pieceCols * self.cellSize) // 2
+            
+            for row in range(pieceRows):
+                for col in range(pieceCols):
+                    if self.holdPiece[row][col]:
+                        drawCell(self, canvas, 
+                                 row + centerRow // self.cellSize + 1,  # +1 to account for the "HOLD" text
+                                 col + centerCol // self.cellSize,
+                                 self.holdPieceColor,
+                                 holdLeftMargin, holdTopMargin)
+
+    # Draw the next pieces panel
+    def drawNextPiecesPane(self, canvas):
+        # Calculate next pieces panel position
+        nextLeftMargin = self.boardLeftMargin + self.cols * self.cellSize + self.margin
+        nextTopMargin = self.margin
+        
+        # Draw next pieces panel border
+        canvas.create_rectangle(nextLeftMargin, nextTopMargin,
+                                nextLeftMargin + self.nextPaneWidth,
+                                nextTopMargin + self.nextPaneHeight,
+                                fill="black", width=2, outline="white")
+        
+        # Draw "NEXT" text
+        canvas.create_text(nextLeftMargin + self.nextPaneWidth // 2,
+                          nextTopMargin + 20,
+                          text="NEXT", fill="white",
+                          font="Arial 16 bold")
+        
+        # Draw the next 4 pieces
+        for i in range(min(4, len(self.nextPiecesIndices))):
+            pieceIndex = self.nextPiecesIndices[i]
+            piece = self.tetrisPieces[pieceIndex]
+            pieceColor = self.tetrisPieceColors[pieceIndex]
+            
+            # Center each piece horizontally in the next panel
+            pieceRows = len(piece)
+            pieceCols = len(piece[0])
+            centerCol = (self.nextPaneWidth - pieceCols * self.cellSize) // 2
+            
+            # Space pieces vertically, starting after the "NEXT" text
+            startRow = 2 + i * 5  # 2 rows for "NEXT" text, then 5 rows per piece
+            
+            for row in range(pieceRows):
+                for col in range(pieceCols):
+                    if piece[row][col]:
+                        drawCell(self, canvas,
+                                 startRow + row,
+                                 centerCol // self.cellSize + col,
+                                 pieceColor,
+                                 nextLeftMargin, nextTopMargin)
 
     def drawModeIndicator(self, canvas):
         """Draw current mode indicator in the top-right corner"""
@@ -313,7 +455,7 @@ class TetrisWithAI(App):
         # Semi-transparent background
         canvas.create_rectangle(
             0, 0, self.width, self.height,
-            fill="#white", stipple="gray50"
+            fill="white", stipple="gray50"
         )
         
         # Options box
@@ -404,6 +546,10 @@ class TetrisWithAI(App):
         drawBoard(self, canvas)
         drawFallingPiece(self, canvas)
         
+        # Draw hold and next pieces panes
+        self.drawHoldPane(canvas)
+        self.drawNextPiecesPane(canvas)
+        
         # Draw mode indicator
         self.drawModeIndicator(canvas)
         
@@ -424,9 +570,17 @@ class TetrisWithAI(App):
         self.drawOptions(canvas)
 
 def runTetrisWithAI():
-    # Use the dimensions from tetris_game.py
+    # Calculate window width to accommodate the board, hold pane, and next pieces pane
     rows, cols, cellSize, margin = gameDimensions()
-    game = TetrisWithAI(width=cols*cellSize+2*margin, height=rows*cellSize+2*margin)
+    boardWidth = cols * cellSize
+    holdPaneWidth = 6 * cellSize
+    nextPaneWidth = 6 * cellSize
+    
+    # Calculate window dimensions with extra space for margins between panes
+    windowWidth = holdPaneWidth + boardWidth + nextPaneWidth + 4 * margin
+    windowHeight = rows * cellSize + 4 * margin
+    
+    game = TetrisWithAI(width=windowWidth, height=windowHeight)
 
 if __name__ == "__main__":
     runTetrisWithAI()
