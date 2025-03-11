@@ -64,59 +64,30 @@ def calculate_state_features(board, rows, cols, emptyColor):
     return features
 
 def calculate_shaped_reward(self, app, action, score_change):
-    """
-    Calculate a shaped reward based on board state changes after applying an action.
+    reward = score_change
     
-    Args:
-        app: The game state after the action is applied
-        action: The action that was taken
-        score_change: The raw score change from the action
+    # Penalties for bad board states
+    features = calculate_state_features(app.board, app.rows, app.cols, app.emptyColor)
     
-    Returns:
-        float: The shaped reward value
-    """
+    # Discourage holes and uneven surfaces
+    reward -= 0.5 * features['holes']
+    reward -= 0.3 * features['bumpiness']
     
-    # We need to know the state before the action was taken
-    # Since we already executed the action, we'll need to reconstruct the previous state
-    # This is a simplification - ideally we would store the previous state features
+    # Encourage complete lines with escalating bonus
+    line_bonus = {
+        1: 1.0,   # Single line
+        2: 3.0,   # Double line
+        3: 7.0,   # Triple line
+        4: 20.0   # Tetris
+    }
+    reward += line_bonus.get(features['complete_lines'], 0)
     
-    # Calculate features of the current state
-    current_features = calculate_state_features(app.board, app.rows, app.cols, app.emptyColor)
+    # Height management
+    max_height = features['max_height']
+    height_penalty = max(0, (max_height - 10) * 0.5)
+    reward -= height_penalty
     
-    # Basic reward from score
-    total_reward = score_change
-    
-    # 1. Penalty for holes - critical for good stacking
-    holes = current_features['holes']
-    total_reward -= 0.5 * holes
-    
-    # 2. Penalty for bumpiness - encourages flat surfaces
-    bumpiness = current_features['bumpiness']
-    total_reward -= 3 * bumpiness
-    
-    # 3. Reward for completed lines (already included in score_change, but we can emphasize it)
-    complete_lines = current_features['complete_lines']
-    if complete_lines == 4:  # Tetris
-        total_reward += 20.0  # Much higher bonus for Tetris
-    elif complete_lines == 3:
-        total_reward += 10.0  # Triple
-    elif complete_lines == 2:
-        total_reward += 5.0   # Double
-    else:
-        total_reward += 2.0   # Single
-    
-    # 4. Penalty for height - discourages building too high
-    max_height = current_features['max_height']
-    # Progressive penalty that gets worse as the stack gets higher
-    height_penalty = 0.2 * max_height if max_height < 10 else 0.5 * max_height
-    total_reward -= height_penalty
-    
-    # 5. Check if hold piece was used in this action
-    # This requires tracking in the controller class, but we can add a simple
-    # incentive based on the action type if that information is available
-    # For now we'll rely on the controller to add this bonus
-    
-    return total_reward
+    return reward
 
 def plot_training_progress(episodes, scores, avg_scores, losses=None, filename=None):
     """

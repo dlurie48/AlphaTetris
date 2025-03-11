@@ -7,21 +7,19 @@ from tetris_game import *
 from configs import GAME_CONFIG, AI_CONFIG, REWARDS
 from helpers import calculate_state_features, calculate_shaped_reward, ExperienceBuffer
 
-random.seed(1)
-
 class TetrisNet(nn.Module):
     def __init__(self):
         super(TetrisNet, self).__init__()
         # Neural network that only uses the calculated state features
         self.layers = nn.Sequential(
             # Input layer for state features
-            nn.Linear(6 + 10, 64),  # 6 scalar features + 10 column heights from calculate_state_features
+            nn.Linear(22, 64),  # 6 scalar features + 10 column heights from calculate_state_features
             nn.ReLU(),
             nn.Linear(64, 32),
             nn.ReLU(),
             nn.Linear(32, 1)  # Single output for V-value
         )
-    
+
     def forward(self, state_features):
         return self.layers(state_features)
 
@@ -46,30 +44,38 @@ class TetrisAI:
         # Experience buffer setup with shape for feature vector
         self.experience_buffer = ExperienceBuffer(
             self.buffer_size, 
-            (16,),  # 6 scalar features + 10 column heights
+            (22,),  # 6 scalar features + 10 column heights
             self.device
         )
     
     def get_state_representation(self, app):
-        """Convert game state to feature tensor representation for neural network input"""
-        # Get calculated state features from helpers.py
+        # Get calculated state features
         features_dict = calculate_state_features(app.board, app.rows, app.cols, app.emptyColor)
         
-        # Extract column heights (should be list of length equal to app.cols)
+        # Extract column heights
         column_heights = features_dict['column_heights']
         
-        # Create a tensor with all the features
+        # Encode piece information
+        current_piece_index = app.tetrisPieces.index(app.fallingPiece) if app.fallingPiece in app.tetrisPieces else -1
+        hold_piece_index = app.tetrisPieces.index(app.holdPiece) if app.holdPiece is not None and app.holdPiece in app.tetrisPieces else -1
+        
+        # Get next piece indices, padding with -1 if fewer than 4 pieces
+        next_pieces = app.nextPiecesIndices[:4] + [-1] * (4 - len(app.nextPiecesIndices))
+        
+        # Combine features
         feature_values = [
             features_dict['holes'],
             features_dict['bumpiness'],
             features_dict['aggregate_height'],
             features_dict['max_height'],
             features_dict['complete_lines'],
-            features_dict.get('aggregate_height', 0) / app.rows  # Normalized height
+            features_dict.get('aggregate_height', 0) / app.rows,  # Normalized height
         ]
         
-        # Add column heights as individual features
+        # Add column heights and next pieces
         feature_values.extend(column_heights)
+        feature_values.extend([current_piece_index, hold_piece_index])
+        feature_values.extend(next_pieces)
         
         # Convert to tensor
         state_features = torch.tensor(feature_values, dtype=torch.float32, device=self.device).view(1, -1)
@@ -239,8 +245,8 @@ class TetrisAI:
         # Simulate placing the piece
         original_score = app_copy.score
         placeFallingPiece(app_copy)
-        reward = app_copy.score - original_score
-        
+        score_change = app_copy.score - original_score
+        reward = score_change
         # Calculate shaped reward
 
         #reward = calculate_shaped_reward(self, app, action, score_change)
