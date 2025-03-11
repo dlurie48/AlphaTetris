@@ -297,10 +297,6 @@ class TetrisWithAI(App):
         
         # Execute hold action if requested
         if action.get('is_hold', False):
-            # If we're not in batch mode, we can log the hold action
-            if not batch_mode:
-                print("AI used HOLD action!")
-            
             # Execute hold action using the existing holdPiece function
             holdPiece(self)
         

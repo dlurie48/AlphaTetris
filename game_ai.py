@@ -240,7 +240,8 @@ class TetrisAI:
         score_change = app_copy.score - original_score
         
         # Calculate shaped reward
-        reward = score_change  # Can use calculate_shaped_reward instead if preferred
+
+        reward = calculate_shaped_reward(self, app, action, score_change)
         
         # Simulate getting a new piece to check game over
         newFallingPiece(app_copy)
@@ -253,6 +254,7 @@ class TetrisAI:
         next_state = self.get_state_representation(app_copy)
         
         return next_state, reward, is_terminal
+    
     def choose_action(self, app):
         """Choose action using epsilon-greedy policy"""
         possible_actions = self.get_possible_actions(app)
