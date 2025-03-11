@@ -93,7 +93,7 @@ def calculate_shaped_reward(self, app, action, score_change):
     
     # 2. Penalty for bumpiness - encourages flat surfaces
     bumpiness = current_features['bumpiness']
-    total_reward -= 0.2 * bumpiness
+    total_reward -= 1 * bumpiness
     
     # 3. Reward for completed lines (already included in score_change, but we can emphasize it)
     complete_lines = current_features['complete_lines']
