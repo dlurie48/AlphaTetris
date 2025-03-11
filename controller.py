@@ -229,6 +229,7 @@ class TetrisWithAI(App):
                 if not fallingPieceIsLegal(self, self.fallingPieceRow, self.fallingPieceCol):
                     self.isGameOver = True
     
+    # Update executeAIMove method in TetrisWithAI class to support hold actions
     def executeAIMove(self, batch_mode=False):
         """Execute a single AI move and update training data
         
@@ -270,7 +271,7 @@ class TetrisWithAI(App):
             
             # Add experience with proper terminal state handling
             self.ai.add_experience(self.lastState, self.lastAction, 
-                                  reward, current_state, terminal)
+                                reward, current_state, terminal)
             
             if reward != 0 and not batch_mode:
                 print(f"Got reward: {reward}, total episode reward: {self.currentEpisodeReward}")
@@ -293,6 +294,15 @@ class TetrisWithAI(App):
         if action is None or self.isGameOver:
             self.isGameOver = True
             return
+        
+        # Execute hold action if requested
+        if action.get('is_hold', False):
+            # If we're not in batch mode, we can log the hold action
+            if not batch_mode:
+                print("AI used HOLD action!")
+            
+            # Execute hold action using the existing holdPiece function
+            holdPiece(self)
         
         # Apply action
         self.fallingPiece = action['piece']

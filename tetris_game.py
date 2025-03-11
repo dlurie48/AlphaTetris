@@ -109,7 +109,7 @@ def generateAllPossiblePlacements(app):
     for rotation in range(4):  # Most pieces have at most 4 unique rotations
         app.fallingPiece = copy.deepcopy(originalPiece)
         for _ in range(rotation):
-            _rotatePieceWithoutChecking(app)
+            rotatePieceWithoutChecking(app)
         
         # Try all columns
         for col in range(-len(app.fallingPiece[0]), app.cols):
@@ -138,7 +138,7 @@ def generateAllPossiblePlacements(app):
     
     return possiblePlacements
 
-def _rotatePieceWithoutChecking(app):
+def rotatePieceWithoutChecking(app):
     """
     Rotates the falling piece without checking if it's legal.
     Used during placement generation.

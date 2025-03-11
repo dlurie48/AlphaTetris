@@ -73,9 +73,9 @@ class TetrisAI:
         state_features = torch.tensor(feature_values, dtype=torch.float32, device=self.device).view(1, -1)
         
         return state_features
-    
+        
     def get_possible_actions(self, app):
-        """Generate all valid final placements for the current piece"""
+        """Generate all valid final placements for the current piece and hold options"""
         possible_actions = []
         
         # Store original piece state
@@ -83,23 +83,55 @@ class TetrisAI:
         original_row = app.fallingPieceRow
         original_col = app.fallingPieceCol
         
-        # Get unique rotations for the current piece type
+        # First, handle current piece actions
+        self._add_piece_actions(app, app.fallingPiece, possible_actions, is_hold=False)
+        
+        # Then, handle hold piece actions if available and not already used this turn
+        if not app.holdPieceUsed and app.holdPiece is not None:
+            self._add_piece_actions(app, app.holdPiece, possible_actions, is_hold=True)
+        # Or if we don't have a hold piece yet, simulate using the next piece
+        elif not app.holdPieceUsed and app.holdPiece is None and app.nextPiecesIndices:
+            next_piece_idx = app.nextPiecesIndices[0]
+            next_piece = app.tetrisPieces[next_piece_idx]
+            self._add_piece_actions(app, next_piece, possible_actions, is_hold=True)
+        
+        # Restore original piece state
+        app.fallingPiece = original_piece
+        app.fallingPieceRow = original_row
+        app.fallingPieceCol = original_col
+        
+        return possible_actions
+    
+    def _add_piece_actions(self, app, piece, possible_actions, is_hold=False):
+        """Helper method to add all possible actions for a specific piece"""
+        # Store original piece state
+        original_piece = app.fallingPiece
+        original_row = app.fallingPieceRow
+        original_col = app.fallingPieceCol
+        
+        # Temporarily set the app's falling piece to the piece we're evaluating
+        app.fallingPiece = [row[:] for row in piece]
+        
+        # Get unique rotations for the given piece type
         max_rotations = 4
-        if app.fallingPiece == app.tetrisPieces[3]:  # O piece
-            max_rotations = 1
-        elif app.fallingPiece == app.tetrisPieces[0]:  # I piece
-            max_rotations = 2
+        for piece_idx, tetris_piece in enumerate(app.tetrisPieces):
+            if self._pieces_equal(piece, tetris_piece):
+                if piece_idx == 3:  # O piece
+                    max_rotations = 1
+                elif piece_idx == 0:  # I piece
+                    max_rotations = 2
+                break
         
         # Try all rotations
         for rotation in range(max_rotations):
             # Reset to original piece
-            app.fallingPiece = [row[:] for row in original_piece]
+            app.fallingPiece = [row[:] for row in piece]
             app.fallingPieceRow = 0
             app.fallingPieceCol = app.cols // 2
             
-            # Apply rotations
+            # Apply rotations using the existing function
             for _ in range(rotation):
-                rotateFallingPiece(app)
+                rotatePieceWithoutChecking(app)
             
             # Get piece width after rotation
             piece_width = len(app.fallingPiece[0])
@@ -113,17 +145,18 @@ class TetrisAI:
                 if not fallingPieceIsLegal(app, app.fallingPieceRow, app.fallingPieceCol):
                     continue
                 
-                # Hard drop to get final position
-                temp_row = app.fallingPieceRow
-                while fallingPieceIsLegal(app, temp_row + 1, app.fallingPieceCol):
-                    temp_row += 1
+                # Find final row by dropping the piece
+                row = 0
+                while fallingPieceIsLegal(app, row + 1, app.fallingPieceCol):
+                    row += 1
                 
                 # Record action
                 action = {
-                    'piece': [row[:] for row in app.fallingPiece],  # Deep copy of piece
+                    'piece': [row[:] for row in app.fallingPiece],
                     'rotation': rotation,
-                    'col': col,
-                    'row': temp_row
+                    'col': app.fallingPieceCol,
+                    'row': row,
+                    'is_hold': is_hold
                 }
                 
                 # Check if this is unique compared to existing actions
@@ -131,19 +164,33 @@ class TetrisAI:
                 for existing_action in possible_actions:
                     if (existing_action['col'] == action['col'] and 
                         existing_action['row'] == action['row'] and
-                        existing_action['rotation'] == action['rotation']):
+                        existing_action['rotation'] == action['rotation'] and
+                        existing_action['is_hold'] == action['is_hold']):
                         is_unique = False
                         break
                 
                 if is_unique:
                     possible_actions.append(action)
-        
+                    
         # Restore original piece state
         app.fallingPiece = original_piece
         app.fallingPieceRow = original_row
         app.fallingPieceCol = original_col
+
+    def _pieces_equal(self, piece1, piece2):
+        """Helper method to check if two pieces are equal"""
+        if len(piece1) != len(piece2):
+            return False
         
-        return possible_actions
+        for i in range(len(piece1)):
+            if len(piece1[i]) != len(piece2[i]):
+                return False
+            
+            for j in range(len(piece1[i])):
+                if piece1[i][j] != piece2[i][j]:
+                    return False
+        
+        return True
     
     def get_resulting_state(self, app, action):
         """Simulate applying an action and return resulting state"""
@@ -159,12 +206,7 @@ class TetrisAI:
         app_copy.tetrisPieces = app.tetrisPieces  # Reference is fine
         app_copy.tetrisPieceColors = app.tetrisPieceColors  # Reference is fine
         app_copy.isGameOver = False
-        
-        # Set piece state from action
-        app_copy.fallingPiece = [row[:] for row in action['piece']]  # Deep copy the piece
-        app_copy.fallingPieceRow = action['row']
-        app_copy.fallingPieceCol = action['col']
-        app_copy.fallingPieceColor = app.fallingPieceColor
+        app_copy.holdPieceUsed = app.holdPieceUsed
         
         # Copy hold and next pieces safely
         if app.holdPiece is not None:
@@ -173,6 +215,24 @@ class TetrisAI:
             app_copy.holdPiece = None
         app_copy.holdPieceColor = app.holdPieceColor
         app_copy.nextPiecesIndices = app.nextPiecesIndices[:]
+        
+        # Set up additional required properties for holdPiece function to work
+        app_copy.fallingPiece = [row[:] for row in app.fallingPiece]
+        app_copy.fallingPieceColor = app.fallingPieceColor
+        app_copy.fallingPieceRow = app.fallingPieceRow
+        app_copy.fallingPieceCol = app.fallingPieceCol
+        app_copy.holdPieceUsed = app.holdPieceUsed
+        
+        # Handle hold action
+        if action.get('is_hold', False):
+            # Use the existing holdPiece function for consistent behavior
+            from tetris_game import holdPiece
+            holdPiece(app_copy)
+        
+        # Set piece state from action
+        app_copy.fallingPiece = [row[:] for row in action['piece']]  # Deep copy the piece
+        app_copy.fallingPieceRow = action['row']
+        app_copy.fallingPieceCol = action['col']
         
         # Simulate placing the piece
         original_score = app_copy.score
@@ -193,7 +253,6 @@ class TetrisAI:
         next_state = self.get_state_representation(app_copy)
         
         return next_state, reward, is_terminal
-    
     def choose_action(self, app):
         """Choose action using epsilon-greedy policy"""
         possible_actions = self.get_possible_actions(app)
