@@ -7,6 +7,8 @@ from tetris_game import *
 from configs import GAME_CONFIG, AI_CONFIG, REWARDS
 from helpers import calculate_state_features, calculate_shaped_reward, ExperienceBuffer
 
+random.seed(1)
+
 class TetrisNet(nn.Module):
     def __init__(self):
         super(TetrisNet, self).__init__()
@@ -237,11 +239,11 @@ class TetrisAI:
         # Simulate placing the piece
         original_score = app_copy.score
         placeFallingPiece(app_copy)
-        score_change = app_copy.score - original_score
+        reward = app_copy.score - original_score
         
         # Calculate shaped reward
 
-        reward = calculate_shaped_reward(self, app, action, score_change)
+        #reward = calculate_shaped_reward(self, app, action, score_change)
         
         # Simulate getting a new piece to check game over
         newFallingPiece(app_copy)

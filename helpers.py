@@ -75,7 +75,6 @@ def calculate_shaped_reward(self, app, action, score_change):
     Returns:
         float: The shaped reward value
     """
-    from helpers import calculate_state_features
     
     # We need to know the state before the action was taken
     # Since we already executed the action, we'll need to reconstruct the previous state
@@ -93,16 +92,18 @@ def calculate_shaped_reward(self, app, action, score_change):
     
     # 2. Penalty for bumpiness - encourages flat surfaces
     bumpiness = current_features['bumpiness']
-    total_reward -= 1 * bumpiness
+    total_reward -= 3 * bumpiness
     
     # 3. Reward for completed lines (already included in score_change, but we can emphasize it)
     complete_lines = current_features['complete_lines']
-    if complete_lines > 0:
-        # Bonus for multiple line clears
-        if complete_lines == 4:  # Tetris
-            total_reward += 4.0  # Extra bonus for Tetris
-        elif complete_lines > 1:
-            total_reward += 0.5 * complete_lines  # Small bonus for multi-line clear
+    if complete_lines == 4:  # Tetris
+        total_reward += 20.0  # Much higher bonus for Tetris
+    elif complete_lines == 3:
+        total_reward += 10.0  # Triple
+    elif complete_lines == 2:
+        total_reward += 5.0   # Double
+    else:
+        total_reward += 2.0   # Single
     
     # 4. Penalty for height - discourages building too high
     max_height = current_features['max_height']
