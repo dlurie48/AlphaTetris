@@ -12,43 +12,55 @@ class TetrisNet(nn.Module):
     def __init__(self):
         super(TetrisNet, self).__init__()
         
-        # Board state processing
-        self.conv1 = nn.Conv2d(1, 32, kernel_size=4, stride=1, padding=1)
-        self.conv2 = nn.Conv2d(1, 32, kernel_size=6, stride=1, padding=2)
+        # CNN path 1: 4x128 convolution
+        self.conv1 = nn.Conv2d(1, 128, kernel_size=4, stride=1, padding=1)
+        
+        # CNN path 2: 6x64 convolution
+        self.conv2 = nn.Conv2d(1, 64, kernel_size=6, stride=1, padding=2)
+        
+        # Batch normalization for input
         self.batch_norm = nn.BatchNorm2d(1)
         
-        # Calculate final CNN feature size (64 for both CNNs combined)
-        cnn_features = 128
+        # Calculate CNN output features
+        # CNN 1: 128 filters with max and avg pooling = 256 features
+        # CNN 2: 64 filters with max and avg pooling = 128 features
+        cnn_features = 256 + 128  # = 384
         
-        # Feature processing layers
-        self.fc1 = nn.Linear(191, 128)  # 70 for state features
+        # Additional features size (all non-board state inputs)
+        # Column heights and holes: 10 + 10 = 20
+        # Hold piece availability: 1
+        # Current piece, hold piece, and 4 next pieces: 6 × 7 = 42
+        additional_features = 63
+        
+        # Total input to first fully connected layer
+        total_input_features = cnn_features + additional_features  # = 447
+        
+        # Fully connected layers
+        self.fc1 = nn.Linear(total_input_features, 128)
         self.fc2 = nn.Linear(128, 64)
         self.fc3 = nn.Linear(64, 1)
         
     def forward(self, x):
         # Split input into board state and feature vector
-        board_state = x[:, :200].view(-1, 1, 20, 10)  # 20 rows x 10 cols
-        feature_vector = x[:, 200:]  # Rest are features
+        # Board state is the first 200 elements (20x10)
+        board_state = x[:, :200].view(-1, 1, 20, 10)  # Reshape to [batch, channels, height, width]
+        additional_inputs = x[:, 200:]  # Rest are features
         
         # Process board state
         board_state = self.batch_norm(board_state)
         
-        # CNN Path 1
+        # CNN Path 1 (4x128)
         c1 = F.relu(self.conv1(board_state))
-        c1_features = torch.cat([
-            torch.max(c1.view(c1.size(0), c1.size(1), -1), dim=2)[0],
-            torch.mean(c1.view(c1.size(0), c1.size(1), -1), dim=2)
-        ], dim=1)
+        c1_max = torch.max(c1.view(c1.size(0), c1.size(1), -1), dim=2)[0]  # Max pooling
+        c1_avg = torch.mean(c1.view(c1.size(0), c1.size(1), -1), dim=2)    # Average pooling
         
-        # CNN Path 2  
+        # CNN Path 2 (6x64)
         c2 = F.relu(self.conv2(board_state))
-        c2_features = torch.cat([
-            torch.max(c2.view(c2.size(0), c2.size(1), -1), dim=2)[0],
-            torch.mean(c2.view(c2.size(0), c2.size(1), -1), dim=2)
-        ], dim=1)
+        c2_max = torch.max(c2.view(c2.size(0), c2.size(1), -1), dim=2)[0]  # Max pooling
+        c2_avg = torch.mean(c2.view(c2.size(0), c2.size(1), -1), dim=2)    # Average pooling
         
-        # Combine all features
-        combined = torch.cat([c1_features, c2_features, feature_vector], dim=1)
+        # Concatenate all features: CNN outputs + additional inputs
+        combined = torch.cat([c1_max, c1_avg, c2_max, c2_avg, additional_inputs], dim=1)
         
         # Process through fully connected layers
         x = F.relu(self.fc1(combined))
@@ -69,67 +81,107 @@ class TetrisAI:
         # Device configuration
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Create networks
-        self.model = TetrisNet().to(self.device)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
-        self.loss_fn = nn.HuberLoss()
+        # Set the fixed state dimension to 263 as calculated
+        # 200 (board state) + 
+        # 10 (column heights) + 10 (holes) + 1 (hold allowed) + 
+        # 42 (current piece + hold piece + 4 next pieces) = 263
+        self.state_dim = 263
         
-        # Experience buffer setup with shape for feature vector
+        # Create network - ensure TetrisNet is a separate class
+        self._create_model()
+        
+        # Initialize experience buffer with the fixed dimension
         self.experience_buffer = ExperienceBuffer(
             self.buffer_size,
-            (270,),  # 200 board state + 70 features
+            (self.state_dim,),
             self.device
         )
     
+    def _create_model(self):
+        """Create the neural network model"""
+        self.model = TetrisNet().to(self.device)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
+        self.loss_fn = nn.HuberLoss()
+    
     def get_state_representation(self, app):
-        """Convert game state to a single tensor containing both board state and features"""
-        # Flatten board state
+        """
+        Convert game state to a tensor containing both board state and features:
+        - Board state (20x10 = 200)
+        - Column heights (10)
+        - Hole positions (10)
+        - Hold allowed (1)
+        - Current piece, hold piece, and 4 next pieces (6 × 7 = 42)
+        Total: 263 features
+        
+        State s contains: current piece, hold piece, and 4 next pieces
+        State s' contains: future current piece, hold piece, 3 next pieces, and unknown 4th next piece
+        """
+        # 1. Get board state (200 elements)
         board_state = []
         for row in range(app.rows):  # 20 rows
             for col in range(app.cols):  # 10 cols
                 board_state.append(1.0 if app.board[row][col] != app.emptyColor else 0.0)
         
-        # Create feature vector
+        # 2. Create feature vector
         features = []
         
-        # Get column heights and holes
+        # Column heights (10 features)
         heights = []
-        holes = []
         for col in range(app.cols):  # 10 columns
             col_height = 0
-            col_holes = 0
-            found_block = False
-            for row in range(app.rows):  # 20 rows
+            for row in range(app.rows):
                 if app.board[row][col] != app.emptyColor:
-                    if not found_block:
-                        col_height = app.rows - row
+                    col_height = app.rows - row
+                    break
+            heights.append(col_height / app.rows)  # Normalize height
+        features.extend(heights)
+        
+        # Hole positions (10 features)
+        holes = []
+        for col in range(app.cols):
+            found_block = False
+            col_holes = 0
+            for row in range(app.rows):
+                if app.board[row][col] != app.emptyColor:
                     found_block = True
                 elif found_block:
                     col_holes += 1
-            heights.append(col_height / app.rows)  # Normalize height
             holes.append(col_holes / app.rows)  # Normalize holes
+        features.extend(holes)
         
-        features.extend(heights)  # Column heights
-        features.extend(holes)    # Hole counts
-        
-        # Hold piece availability
+        # Hold piece availability (1 feature)
         features.append(1.0 if not app.holdPieceUsed else 0.0)
         
-        # Current piece one-hot encoding
+        # Current piece one-hot encoding (7 features)
         current_piece = [0] * 7
         if app.fallingPiece in app.tetrisPieces:
             current_piece[app.tetrisPieces.index(app.fallingPiece)] = 1
         features.extend(current_piece)
         
-        # Hold and next pieces one-hot encoding
-        for piece in [app.holdPiece] + [app.tetrisPieces[i] for i in app.nextPiecesIndices[:5]]:
+        # Hold piece one-hot encoding (7 features)
+        hold_encoding = [0] * 7
+        if app.holdPiece is not None and app.holdPiece in app.tetrisPieces:
+            hold_encoding[app.tetrisPieces.index(app.holdPiece)] = 1
+        features.extend(hold_encoding)
+        
+        # Next pieces one-hot encoding (4 next pieces)
+        available_next_pieces = min(4, len(app.nextPiecesIndices))
+        for i in range(available_next_pieces):
+            piece_idx = app.nextPiecesIndices[i]
             piece_encoding = [0] * 7
-            if piece in app.tetrisPieces:
-                piece_encoding[app.tetrisPieces.index(piece)] = 1
+            piece_encoding[piece_idx] = 1
             features.extend(piece_encoding)
         
-        # Combine board state and features into single tensor
+        # If we don't have 4 next pieces, pad with zeros
+        for _ in range(4 - available_next_pieces):
+            features.extend([0] * 7)
+        
+        # Combine board state and features
         combined_state = board_state + features
+        
+        # Ensure we have exactly the expected number of elements (200 board + 63 features = 263)
+        assert len(combined_state) == 263, f"Expected 263 features, got {len(combined_state)}"
+        
         return torch.tensor([combined_state], device=self.device, dtype=torch.float32)
 
     def get_possible_actions(self, app):
@@ -251,7 +303,10 @@ class TetrisAI:
         return True
     
     def get_resulting_state(self, app, action):
-        """Simulate applying an action and return resulting state"""
+        """
+        Simulate applying an action and return resulting state
+        For s', the 4th next piece is unknown and represented as [0,0,0,0,0,0,0]
+        """
         # Create a minimal app copy with only essential attributes
         app_copy = type('AppCopy', (), {})()
         
@@ -272,14 +327,20 @@ class TetrisAI:
         else:
             app_copy.holdPiece = None
         app_copy.holdPieceColor = app.holdPieceColor
-        app_copy.nextPiecesIndices = app.nextPiecesIndices[:]
+        
+        # Copy next pieces, but for s', we'll only use the first 3 next pieces
+        # The 4th next piece will be represented by zeros in get_state_representation
+        if len(app.nextPiecesIndices) > 0:
+            # For s', we only know 3 of the next pieces
+            app_copy.nextPiecesIndices = app.nextPiecesIndices[:min(3, len(app.nextPiecesIndices))]
+        else:
+            app_copy.nextPiecesIndices = []
         
         # Set up additional required properties for holdPiece function to work
         app_copy.fallingPiece = [row[:] for row in app.fallingPiece]
         app_copy.fallingPieceColor = app.fallingPieceColor
         app_copy.fallingPieceRow = app.fallingPieceRow
         app_copy.fallingPieceCol = app.fallingPieceCol
-        app_copy.holdPieceUsed = app.holdPieceUsed
         
         # Handle hold action
         if action.get('is_hold', False):
@@ -297,9 +358,6 @@ class TetrisAI:
         placeFallingPiece(app_copy)
         score_change = app_copy.score - original_score
         reward = score_change
-        # Calculate shaped reward
-
-        #reward = calculate_shaped_reward(self, app, action, score_change)
         
         # Simulate getting a new piece to check game over
         newFallingPiece(app_copy)
