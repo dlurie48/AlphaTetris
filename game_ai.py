@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 import random
 from tetris_game import *
 from configs import GAME_CONFIG, AI_CONFIG, REWARDS
@@ -10,78 +11,127 @@ from helpers import calculate_state_features, calculate_shaped_reward, Experienc
 class TetrisNet(nn.Module):
     def __init__(self):
         super(TetrisNet, self).__init__()
-        # Neural network that only uses the calculated state features
-        self.layers = nn.Sequential(
-            # Input layer for state features
-            nn.Linear(22, 64),  # 6 scalar features + 10 column heights from calculate_state_features
-            nn.ReLU(),
-            nn.Linear(64, 32),
-            nn.ReLU(),
-            nn.Linear(32, 1)  # Single output for V-value
-        )
-
-    def forward(self, state_features):
-        return self.layers(state_features)
-
+        
+        # Board state processing
+        self.conv1 = nn.Conv2d(1, 32, kernel_size=4, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(1, 32, kernel_size=6, stride=1, padding=2)
+        self.batch_norm = nn.BatchNorm2d(1)
+        
+        # Calculate final CNN feature size (64 for both CNNs combined)
+        cnn_features = 128
+        
+        # Feature processing layers
+        self.fc1 = nn.Linear(191, 128)  # 70 for state features
+        self.fc2 = nn.Linear(128, 64)
+        self.fc3 = nn.Linear(64, 1)
+        
+    def forward(self, x):
+        # Split input into board state and feature vector
+        board_state = x[:, :200].view(-1, 1, 20, 10)  # 20 rows x 10 cols
+        feature_vector = x[:, 200:]  # Rest are features
+        
+        # Process board state
+        board_state = self.batch_norm(board_state)
+        
+        # CNN Path 1
+        c1 = F.relu(self.conv1(board_state))
+        c1_features = torch.cat([
+            torch.max(c1.view(c1.size(0), c1.size(1), -1), dim=2)[0],
+            torch.mean(c1.view(c1.size(0), c1.size(1), -1), dim=2)
+        ], dim=1)
+        
+        # CNN Path 2  
+        c2 = F.relu(self.conv2(board_state))
+        c2_features = torch.cat([
+            torch.max(c2.view(c2.size(0), c2.size(1), -1), dim=2)[0],
+            torch.mean(c2.view(c2.size(0), c2.size(1), -1), dim=2)
+        ], dim=1)
+        
+        # Combine all features
+        combined = torch.cat([c1_features, c2_features, feature_vector], dim=1)
+        
+        # Process through fully connected layers
+        x = F.relu(self.fc1(combined))
+        x = F.relu(self.fc2(x))
+        return self.fc3(x)
+    
 class TetrisAI:
     def __init__(self):
-        # Parameters from config
+        # Load parameters from AI_CONFIG
         self.buffer_size = AI_CONFIG['buffer_size']
         self.batch_size = AI_CONFIG['batch_size']
         self.gamma = AI_CONFIG['gamma']
         self.epsilon = AI_CONFIG['epsilon']
         self.epsilon_decay = AI_CONFIG['epsilon_decay']
         self.epsilon_min = AI_CONFIG['epsilon_min']
+        self.learning_rate = AI_CONFIG['learning_rate']
         
         # Device configuration
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Create the neural network model
+        # Create networks
         self.model = TetrisNet().to(self.device)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=AI_CONFIG['learning_rate'])
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
         self.loss_fn = nn.HuberLoss()
         
         # Experience buffer setup with shape for feature vector
         self.experience_buffer = ExperienceBuffer(
-            self.buffer_size, 
-            (22,),  # 6 scalar features + 10 column heights
+            self.buffer_size,
+            (270,),  # 200 board state + 70 features
             self.device
         )
     
     def get_state_representation(self, app):
-        # Get calculated state features
-        features_dict = calculate_state_features(app.board, app.rows, app.cols, app.emptyColor)
+        """Convert game state to a single tensor containing both board state and features"""
+        # Flatten board state
+        board_state = []
+        for row in range(app.rows):  # 20 rows
+            for col in range(app.cols):  # 10 cols
+                board_state.append(1.0 if app.board[row][col] != app.emptyColor else 0.0)
         
-        # Extract column heights
-        column_heights = features_dict['column_heights']
+        # Create feature vector
+        features = []
         
-        # Encode piece information
-        current_piece_index = app.tetrisPieces.index(app.fallingPiece) if app.fallingPiece in app.tetrisPieces else -1
-        hold_piece_index = app.tetrisPieces.index(app.holdPiece) if app.holdPiece is not None and app.holdPiece in app.tetrisPieces else -1
+        # Get column heights and holes
+        heights = []
+        holes = []
+        for col in range(app.cols):  # 10 columns
+            col_height = 0
+            col_holes = 0
+            found_block = False
+            for row in range(app.rows):  # 20 rows
+                if app.board[row][col] != app.emptyColor:
+                    if not found_block:
+                        col_height = app.rows - row
+                    found_block = True
+                elif found_block:
+                    col_holes += 1
+            heights.append(col_height / app.rows)  # Normalize height
+            holes.append(col_holes / app.rows)  # Normalize holes
         
-        # Get next piece indices, padding with -1 if fewer than 4 pieces
-        next_pieces = app.nextPiecesIndices[:4] + [-1] * (4 - len(app.nextPiecesIndices))
+        features.extend(heights)  # Column heights
+        features.extend(holes)    # Hole counts
         
-        # Combine features
-        feature_values = [
-            features_dict['holes'],
-            features_dict['bumpiness'],
-            features_dict['aggregate_height'],
-            features_dict['max_height'],
-            features_dict['complete_lines'],
-            features_dict.get('aggregate_height', 0) / app.rows,  # Normalized height
-        ]
+        # Hold piece availability
+        features.append(1.0 if not app.holdPieceUsed else 0.0)
         
-        # Add column heights and next pieces
-        feature_values.extend(column_heights)
-        feature_values.extend([current_piece_index, hold_piece_index])
-        feature_values.extend(next_pieces)
+        # Current piece one-hot encoding
+        current_piece = [0] * 7
+        if app.fallingPiece in app.tetrisPieces:
+            current_piece[app.tetrisPieces.index(app.fallingPiece)] = 1
+        features.extend(current_piece)
         
-        # Convert to tensor
-        state_features = torch.tensor(feature_values, dtype=torch.float32, device=self.device).view(1, -1)
+        # Hold and next pieces one-hot encoding
+        for piece in [app.holdPiece] + [app.tetrisPieces[i] for i in app.nextPiecesIndices[:5]]:
+            piece_encoding = [0] * 7
+            if piece in app.tetrisPieces:
+                piece_encoding[app.tetrisPieces.index(piece)] = 1
+            features.extend(piece_encoding)
         
-        return state_features
-        
+        # Combine board state and features into single tensor
+        combined_state = board_state + features
+        return torch.tensor([combined_state], device=self.device, dtype=torch.float32)
+
     def get_possible_actions(self, app):
         """Generate all valid final placements for the current piece and hold options"""
         possible_actions = []
