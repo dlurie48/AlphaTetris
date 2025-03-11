@@ -107,7 +107,7 @@ def calculate_shaped_reward(self, app, action, score_change):
     # 4. Penalty for height - discourages building too high
     max_height = current_features['max_height']
     # Progressive penalty that gets worse as the stack gets higher
-    height_penalty = 0.01 * max_height if max_height < 10 else 0.1 * max_height
+    height_penalty = 0.1 * max_height if max_height < 10 else 0.1 * max_height
     total_reward -= height_penalty
     
     # 5. Check if hold piece was used in this action

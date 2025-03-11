@@ -5,7 +5,7 @@ import torch.optim as optim
 import random
 from tetris_game import *
 from configs import GAME_CONFIG, AI_CONFIG, REWARDS
-from helpers import calculate_state_features, ExperienceBuffer
+from helpers import calculate_state_features, calculate_shaped_reward, ExperienceBuffer
 
 class TetrisNet(nn.Module):
     def __init__(self):
@@ -188,33 +188,6 @@ class TetrisAI:
         
         return rotated
     
-    def calculate_shaped_reward(self, app, app_copy, score_change):
-        """Calculate a shaped reward based on board state changes using helpers"""
-        # Get features from current and resulting states
-        current_features = calculate_state_features(app.board, app.rows, app.cols, app.emptyColor)
-        next_features = calculate_state_features(app_copy.board, app_copy.rows, app_copy.cols, app_copy.emptyColor)
-        
-        # Base reward from score
-        reward = score_change
-        
-        # Living bonus - small reward for each move that doesn't end the game
-        if not app_copy.isGameOver:
-            reward += 0.1
-        
-        # Penalty for holes created (key factor in Tetris)
-        holes_created = next_features['holes'] - current_features['holes']
-        if holes_created > 0:
-            reward -= REWARDS['hole_created'] * holes_created
-        
-        # Penalty for height (discourages building too high)
-        reward -= REWARDS['height_penalty'] * next_features['max_height']
-        
-        # Game over penalty
-        if app_copy.isGameOver:
-            reward += REWARDS['game_over']
-        
-        return reward
-    
     def get_resulting_state(self, app, action):
         """Simulate applying an action and return resulting state"""
         # Create a minimal app copy with only essential attributes to avoid deepcopy issues
@@ -250,7 +223,7 @@ class TetrisAI:
         score_change = app_copy.score - original_score
         
         # Calculate shaped reward
-        reward = self.calculate_shaped_reward(app, app_copy, score_change)
+        reward = calculate_shaped_reward(app, app_copy, score_change)
         
         # Simulate getting a new piece to check game over
         newFallingPiece(app_copy)
