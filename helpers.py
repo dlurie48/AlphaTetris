@@ -200,27 +200,19 @@ def print_stats(episode, total_episodes, score, avg_score, loss, time_elapsed, e
     print(f"Episode {progress} {score_str} {loss_str} {eps_str} Time: {time_str}")
 
 class ExperienceBuffer:
-    """A more efficient experience replay buffer using numpy arrays"""
+    """Experience replay buffer for dictionary-based state representations"""
     
-    def __init__(self, buffer_size, state_shape, device='cpu'):
-        """
-        Initialize the experience buffer.
-        
-        Args:
-            buffer_size: Maximum number of experiences to store
-            state_shape: Shape of state tensors
-            device: PyTorch device to place tensors on
-        """
+    def __init__(self, buffer_size, device='cpu'):
         self.buffer_size = buffer_size
         self.device = device
         self.count = 0
         self.full = False
         
-        # Pre-allocate memory for the buffer
-        self.states = torch.zeros((buffer_size, *state_shape), device=device)
-        self.actions = [None] * buffer_size  # Can't pre-allocate complex objects
+        # Use lists instead of tensors since we have complex dictionary objects
+        self.states = [None] * buffer_size
+        self.actions = [None] * buffer_size
         self.rewards = torch.zeros(buffer_size, device=device)
-        self.next_states = torch.zeros((buffer_size, *state_shape), device=device)
+        self.next_states = [None] * buffer_size
         self.dones = torch.zeros(buffer_size, dtype=torch.bool, device=device)
         
     def add(self, state, action, reward, next_state, done):
@@ -242,14 +234,11 @@ class ExperienceBuffer:
         max_idx = self.buffer_size if self.full else self.count
         indices = np.random.choice(max_idx, batch_size, replace=False)
         
-        # Because actions are complex objects, we handle them separately
-        batch_actions = [self.actions[idx] for idx in indices]
-        
         return (
-            self.states[indices],
-            batch_actions,
+            [self.states[idx] for idx in indices],
+            [self.actions[idx] for idx in indices],
             self.rewards[indices],
-            self.next_states[indices],
+            [self.next_states[idx] for idx in indices],
             self.dones[indices]
         )
         
