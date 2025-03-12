@@ -5,18 +5,7 @@ import time
 import random
 import torch
 import threading
-import os
-from configs import GAME_CONFIG, AI_CONFIG, PATHS
-
-# Ensure directories exist
-def ensure_paths():
-    for path in PATHS.values():
-        if path.endswith('/'):  # It's a directory
-            os.makedirs(path, exist_ok=True)
-        else:  # It's a file
-            directory = os.path.dirname(path)
-            if directory:
-                os.makedirs(directory, exist_ok=True)
+from configs import GAME_CONFIG
 
 class TetrisWithAI(App):
     def appStarted(self):
@@ -33,10 +22,6 @@ class TetrisWithAI(App):
         self.aiTrainingStart = None
         self.showAIDebug = False
         self.trainingStepsPerFrame = 50  # Increased from 10 to 50
-        
-        # AI search parameters
-        self.searchDepth = 3  # Default search depth
-        self.ai.search_depth = self.searchDepth
         
         # Training metrics
         self.episodeRewards = []
@@ -96,44 +81,14 @@ class TetrisWithAI(App):
             
         # Model operations
         if event.key == "l" and self.gameMode != "ai_player_training":
-            ensure_paths()
-            path = os.path.join(PATHS['models_dir'], "best_model.pt")
-            if os.path.exists(path):
-                checkpoint = torch.load(path)
-                self.ai.model.load_state_dict(checkpoint['model_state_dict'])
-                if 'target_model_state_dict' in checkpoint:
-                    self.ai.target_model.load_state_dict(checkpoint['target_model_state_dict'])
-                else:
-                    self.ai.target_model.load_state_dict(checkpoint['model_state_dict'])
-                self.ai.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                self.ai.epsilon = checkpoint.get('epsilon', 0.05)
-                self.statusMessage = f"Model loaded from {path}"
-                self.statusTimer = 3000
-            else:
-                self.statusMessage = "No model file found"
-                self.statusTimer = 3000
+            self.ai.load_model("tetris_ai_model.pt")
+            self.statusMessage = "Model loaded from tetris_ai_model.pt"
+            self.statusTimer = 3000
             return
             
         if event.key == "p":
-            ensure_paths()
-            path = os.path.join(PATHS['models_dir'], "saved_model.pt")
-            self.ai.save_model(path)
-            self.statusMessage = f"Model saved to {path}"
-            self.statusTimer = 3000
-            return
-        
-        # Search depth adjust
-        if event.key == "]" and self.gameMode == "ai_player_watching":
-            self.searchDepth = min(5, self.searchDepth + 1)
-            self.ai.search_depth = self.searchDepth
-            self.statusMessage = f"Search depth: {self.searchDepth}"
-            self.statusTimer = 3000
-            return
-            
-        if event.key == "[" and self.gameMode == "ai_player_watching":
-            self.searchDepth = max(1, self.searchDepth - 1)
-            self.ai.search_depth = self.searchDepth
-            self.statusMessage = f"Search depth: {self.searchDepth}"
+            self.ai.save_model("tetris_ai_model.pt")
+            self.statusMessage = "Model saved to tetris_ai_model.pt"
             self.statusTimer = 3000
             return
         
@@ -181,8 +136,7 @@ class TetrisWithAI(App):
         # Cycle modes
         if self.gameMode == "human_player":
             self.gameMode = "ai_player_watching"
-            self.statusMessage = f"AI Mode (Watching). Search depth: {self.searchDepth}"
-            self.ai.search_depth = self.searchDepth
+            self.statusMessage = "AI Mode (Watching). AI plays with visualization."
         elif self.gameMode == "ai_player_watching":
             self.gameMode = "ai_player_training"
             self.statusMessage = "AI Mode (Training). AI trains without visualization."
@@ -215,41 +169,37 @@ class TetrisWithAI(App):
     
     def backgroundTraining(self):
         """Background thread for efficient AI training"""
-        try:
-            while not self.stopTraining:
-                # Process multiple training steps in a batch for efficiency
-                for _ in range(100):
-                    if self.stopTraining:
-                        break
-                    
-                    # Execute a single step
-                    self.executeAIMove(batch_mode=True)
-                    
-                    # If game over, record metrics and reset
-                    if self.isGameOver:
-                        self.episodeRewards.append(self.currentEpisodeReward)
-                        
-                        # Calculate moving averages
-                        if len(self.episodeRewards) > 100:
-                            self.episodeRewards.pop(0)
-                            if self.episodeLosses:
-                                self.episodeLosses.pop(0)
-                        
-                        if self.episodeRewards:
-                            self.avgReward = sum(self.episodeRewards) / len(self.episodeRewards)
-                        
-                        if self.episodeLosses:
-                            self.avgLoss = sum(self.episodeLosses) / len(self.episodeLosses)
-                        
-                        # Start new episode
-                        self.initTetrisGame()
-                        self.aiEpisodes += 1
-                        self.ai.training_episodes += 1
+        while not self.stopTraining:
+            # Train for a batch of steps
+            for _ in range(100):  # Process in larger batches
+                if self.stopTraining:
+                    break
                 
-                # Sleep briefly to prevent CPU overuse
-                time.sleep(0.001)
-        except Exception as e:
-            print(f"Training error: {e}")
+                # Execute a single step
+                self.executeAIMove(batch_mode=True)
+                
+                # If game over, record metrics and reset
+                if self.isGameOver:
+                    self.episodeRewards.append(self.currentEpisodeReward)
+                    
+                    # Calculate moving averages
+                    if len(self.episodeRewards) > 100:
+                        self.episodeRewards.pop(0)
+                        if self.episodeLosses:
+                            self.episodeLosses.pop(0)
+                    
+                    if self.episodeRewards:
+                        self.avgReward = sum(self.episodeRewards) / len(self.episodeRewards)
+                    
+                    if self.episodeLosses:
+                        self.avgLoss = sum(self.episodeLosses) / len(self.episodeLosses)
+                    
+                    # Start new episode
+                    self.initTetrisGame()
+                    self.aiEpisodes += 1
+            
+            # Sleep briefly to prevent CPU overuse
+            time.sleep(0.001)
     
     def timerFired(self):
         # Update status message timer
@@ -267,7 +217,6 @@ class TetrisWithAI(App):
                 self.executeAIMove(batch_mode=True)
                 if self.isGameOver:
                     self.aiEpisodes += 1
-                    self.ai.training_episodes += 1
                     self.initTetrisGame()
                     break
     
@@ -281,11 +230,14 @@ class TetrisWithAI(App):
                     self.isGameOver = True
     
     def executeAIMove(self, batch_mode=False):
-        """Execute a single AI move and update training data"""
+        """Execute a single AI move and update training data
+        
+        Args:
+            batch_mode (bool): If True, minimize overheads for faster training
+        """
         # Handle game over state - reset the board for AI watching mode
         if self.isGameOver and not batch_mode:
             self.aiEpisodes += 1
-            self.ai.training_episodes += 1
             self.episodeRewards.append(self.currentEpisodeReward)
             
             # Calculate moving averages
@@ -311,7 +263,6 @@ class TetrisWithAI(App):
         if self.lastState is not None:
             # Calculate reward (score difference)
             reward = self.score - self.lastScore
-            reward = self.ai.calculate_reward(reward, self.isGameOver)
             self.currentEpisodeReward += reward
             
             # Check if game is over after this action
@@ -319,14 +270,13 @@ class TetrisWithAI(App):
             
             # Add experience with proper terminal state handling
             self.ai.add_experience(self.lastState, self.lastAction, 
-                                reward, current_state, terminal)
+                                  reward, current_state, terminal)
             
             if reward != 0 and not batch_mode:
                 print(f"Got reward: {reward}, total episode reward: {self.currentEpisodeReward}")
             
             # Train the model
-            update_target = (self.ai.training_episodes % AI_CONFIG['target_update'] == 0)
-            loss = self.ai.train(update_target=update_target)
+            loss = self.ai.train()
             if loss is not None:
                 self.episodeLosses.append(loss)
         
@@ -344,11 +294,6 @@ class TetrisWithAI(App):
             self.isGameOver = True
             return
         
-        # Execute hold action if requested
-        if action.get('is_hold', False):
-            # Execute hold action using the existing holdPiece function
-            holdPiece(self)
-        
         # Apply action
         self.fallingPiece = action['piece']
         self.fallingPieceRow = action['row']
@@ -362,8 +307,8 @@ class TetrisWithAI(App):
         if not fallingPieceIsLegal(self, self.fallingPieceRow, self.fallingPieceCol):
             self.isGameOver = True
     
+    # Drawing functions
     def drawHoldPane(self, canvas):
-        """Draw the hold piece panel"""
         holdLeftMargin = self.margin
         holdTopMargin = self.margin
         
@@ -393,7 +338,6 @@ class TetrisWithAI(App):
                                  holdLeftMargin, holdTopMargin)
 
     def drawNextPiecesPane(self, canvas):
-        """Draw the next pieces panel"""
         nextLeftMargin = self.boardLeftMargin + self.cols * self.cellSize + self.margin
         nextTopMargin = self.margin
         
@@ -428,7 +372,6 @@ class TetrisWithAI(App):
                                  nextLeftMargin, nextTopMargin)
 
     def drawModeIndicator(self, canvas):
-        """Draw the current mode indicator"""
         modeColors = {
             "human_player": "green",
             "ai_player_watching": "blue",
@@ -455,7 +398,6 @@ class TetrisWithAI(App):
         )
 
     def drawTrainingInfo(self, canvas):
-        """Draw training metrics if in AI mode"""
         if self.gameMode not in ["ai_player_watching", "ai_player_training"]:
             return
             
@@ -496,17 +438,8 @@ class TetrisWithAI(App):
             text=f"Avg Loss: {self.avgLoss:.6f}", 
             anchor="nw", fill="white", font="Arial 10"
         )
-        
-        # Add search depth for watching mode
-        if self.gameMode == "ai_player_watching":
-            canvas.create_text(
-                infoX, infoY + 80,
-                text=f"Search Depth: {self.searchDepth}", 
-                anchor="nw", fill="white", font="Arial 10"
-            )
     
     def drawStatusMessage(self, canvas):
-        """Draw temporary status messages"""
         if self.statusTimer <= 0:
             return
         
@@ -527,7 +460,6 @@ class TetrisWithAI(App):
         )
 
     def drawOptions(self, canvas):
-        """Draw options menu overlay"""
         if not self.showOptions:
             return
         
@@ -538,8 +470,8 @@ class TetrisWithAI(App):
         
         centerX = self.width // 2
         centerY = self.height // 2
-        boxWidth = 300
-        boxHeight = 250
+        boxWidth = 250
+        boxHeight = 200
         
         canvas.create_rectangle(
             centerX - boxWidth//2, centerY - boxHeight//2,
@@ -558,9 +490,7 @@ class TetrisWithAI(App):
             "L - Load AI Model",
             "P - Save AI Model",
             "O - Close Options",
-            "+/- - Adjust Training Speed",
-            "[/] - Adjust Search Depth",
-            "D - Toggle Debug Info"
+            "+/- - Adjust Training Speed"
         ]
         
         for i, text in enumerate(options):
@@ -568,22 +498,8 @@ class TetrisWithAI(App):
                 centerX, centerY - boxHeight//4 + i*25,
                 text=text, fill="white", font="Arial 12"
             )
-            
-        # Display current AI settings
-        settings = [
-            f"Current Search Depth: {self.searchDepth}",
-            f"Current Epsilon: {self.ai.epsilon:.4f}",
-            f"Training Speed: {self.trainingStepsPerFrame}/frame"
-        ]
-        
-        for i, text in enumerate(settings):
-            canvas.create_text(
-                centerX, centerY + boxHeight//4 + i*20,
-                text=text, fill="#AAAAFF", font="Arial 10"
-            )
     
     def drawTrainingOnlyScreen(self, canvas):
-        """Draw simplified UI during training"""
         canvas.create_rectangle(0, 0, self.width, self.height, fill="black")
         
         trainingTime = time.time() - self.aiTrainingStart if self.aiTrainingStart else 0
@@ -671,15 +587,8 @@ class TetrisWithAI(App):
         
         # Draw options menu if active
         self.drawOptions(canvas)
-        
-        # Draw key instructions
-        instructionY = self.height - self.margin // 2
-        canvas.create_text(self.width // 2, instructionY,
-                          text="Controls: ←→↓: Move, ↑: Rotate, Space: Drop, C: Hold, O: Options",
-                          fill="white", font="Arial 12")
-        
+
 def runTetrisWithAI():
-    """Run the Tetris game with AI capabilities"""
     rows, cols, cellSize, margin = gameDimensions()
     boardWidth = cols * cellSize
     holdPaneWidth = 6 * cellSize
@@ -688,5 +597,7 @@ def runTetrisWithAI():
     windowWidth = holdPaneWidth + boardWidth + nextPaneWidth + 4 * margin
     windowHeight = rows * cellSize + 4 * margin
     
-    ensure_paths()  # Make sure all necessary directories exist
     game = TetrisWithAI(width=windowWidth, height=windowHeight)
+
+if __name__ == "__main__":
+    runTetrisWithAI()

@@ -4,11 +4,19 @@ import argparse
 import os
 import threading
 import time
-from controller import TetrisWithAI, ensure_paths
+from controller import TetrisWithAI
 from game_ai import TetrisAI
 from configs import AI_CONFIG, PATHS
-from tetris_game import *
-import torch
+
+def ensure_directories():
+    """Ensure all required directories exist"""
+    for path in PATHS.values():
+        if path.endswith('/'):  # It's a directory
+            os.makedirs(path, exist_ok=True)
+        else:  # It's a file
+            directory = os.path.dirname(path)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
 
 def train_in_background(ai, episodes, save_interval, save_path):
     """Train the AI in a background thread without GUI"""
@@ -34,12 +42,6 @@ def train_in_background(ai, episodes, save_interval, save_path):
             
             # Apply action
             pre_score = self.score
-            
-            # Execute hold action if requested
-            if action.get('is_hold', False):
-                holdPiece(self)
-                
-            # Set piece position
             self.fallingPiece = action['piece']
             self.fallingPieceRow = action['row']
             self.fallingPieceCol = action['col']
@@ -47,16 +49,12 @@ def train_in_background(ai, episodes, save_interval, save_path):
             # Place piece and update game
             placeFallingPiece(self)
             reward = self.score - pre_score
-            reward = ai.calculate_reward(reward, self.isGameOver)
             
             # Get new piece
             newFallingPiece(self)
             
             # Check if game over
             done = not fallingPieceIsLegal(self, self.fallingPieceRow, self.fallingPieceCol)
-            if done:
-                self.isGameOver = True
-                reward += AI_CONFIG['game_over_penalty']
             
             return ai.get_state_representation(self), reward, done
     
@@ -68,7 +66,7 @@ def train_in_background(ai, episodes, save_interval, save_path):
     
     # Training loop
     while total_episodes < episodes:
-        # Select action using tree search
+        # Select action
         action = ai.choose_action(env)
         
         # Execute action
@@ -82,13 +80,11 @@ def train_in_background(ai, episodes, save_interval, save_path):
         env.episode_reward += reward
         
         # Train model
-        update_target = (ai.training_episodes % AI_CONFIG['target_update'] == 0)
-        ai.train(update_target=update_target)
+        ai.train()
         
         # Check if episode ended
         if done:
             total_episodes += 1
-            ai.training_episodes += 1
             
             # Print progress
             elapsed = time.time() - start_time
@@ -136,13 +132,10 @@ def main():
     parser.add_argument('--epsilon', type=float, default=AI_CONFIG['epsilon'],
                         help=f'Exploration rate (default: {AI_CONFIG["epsilon"]})')
     
-    parser.add_argument('--search-depth', type=int, default=3,
-                        help='Depth for tree search (default: 3)')
-    
     args = parser.parse_args()
     
     # Ensure directories exist
-    ensure_paths()
+    ensure_directories()
     
     if args.train:
         print(f"Training AI for {args.episodes} episodes...")
@@ -150,21 +143,11 @@ def main():
         
         # Create AI instance
         ai = TetrisAI()
-        ai.search_depth = args.search_depth
         
         # Load model if specified
         if args.load_model:
             try:
-                checkpoint = torch.load(args.load_model)
-                ai.model.load_state_dict(checkpoint['model_state_dict'])
-                if 'target_model_state_dict' in checkpoint:
-                    ai.target_model.load_state_dict(checkpoint['target_model_state_dict'])
-                else:
-                    ai.target_model.load_state_dict(checkpoint['model_state_dict'])
-                ai.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                ai.epsilon = checkpoint.get('epsilon', ai.epsilon)
-                ai.training_episodes = checkpoint.get('training_episodes', 0)
-                ai.reward_coef = checkpoint.get('reward_coef', ai.reward_coef)
+                ai.load_model(args.load_model)
                 print(f"Loaded model from {args.load_model}")
             except Exception as e:
                 print(f"Error loading model: {e}")
@@ -193,21 +176,11 @@ def main():
     else:
         # Run the game with GUI
         game = TetrisWithAI(width=600, height=700)
-        game.ai.search_depth = args.search_depth
         
         # If a model was specified, load it
         if args.load_model:
             try:
-                checkpoint = torch.load(args.load_model)
-                game.ai.model.load_state_dict(checkpoint['model_state_dict'])
-                if 'target_model_state_dict' in checkpoint:
-                    game.ai.target_model.load_state_dict(checkpoint['target_model_state_dict'])
-                else:
-                    game.ai.target_model.load_state_dict(checkpoint['model_state_dict'])
-                game.ai.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                game.ai.epsilon = checkpoint.get('epsilon', game.ai.epsilon)
-                game.ai.training_episodes = checkpoint.get('training_episodes', 0)
-                game.ai.reward_coef = checkpoint.get('reward_coef', game.ai.reward_coef)
+                game.ai.load_model(args.load_model)
                 print(f"Loaded model from {args.load_model}")
             except Exception as e:
                 print(f"Error loading model: {e}")
