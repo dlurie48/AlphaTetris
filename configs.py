@@ -19,12 +19,24 @@ AI_CONFIG = {
     'episodes': 1000,           # Number of episodes to train for
     'save_interval': 100,       # Save model every N episodes
     'max_memory': 100000,       # Maximum memory usage (in experiences)
+    
+    # Deep search parameters
+    'search_depth': 3,          # Default tree search depth
+    'search_best': 6,           # Number of best states to keep
+    'search_random': 2,         # Number of random states to include
+    
+    # Reward shaping
+    'game_over_penalty': -10.0, # Penalty for game over
+    'reward_coef_tetris': 1.5,  # Reward coefficient for Tetris (4 lines)
+    'reward_coef_triple': 1.3,  # Reward coefficient for Triple
+    'reward_coef_double': 1.0,  # Reward coefficient for Double
+    'reward_coef_single': 0.8,  # Reward coefficient for Single
 }
 
 # Game settings
 GAME_CONFIG = {
     'ai_move_delay': 300,       # Milliseconds between AI moves
-    'training_speed': 10,       # Speed multiplier during training
+    'training_speed': 50,       # Speed multiplier during training
     'rows': 20,                 # Board rows
     'cols': 10,                 # Board columns
     'cell_size': 30,            # Pixel size of each cell
