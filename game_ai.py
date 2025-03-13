@@ -12,15 +12,19 @@ class TetrisNet(nn.Module):
     def __init__(self, rows=20, cols=10, feature_size=63):
         super(TetrisNet, self).__init__()
         
-        # CNN for board state
+        # CNN for board state - two parallel paths
         self.batch_norm = nn.BatchNorm2d(1)
+        
+        # CNN Path 1: 4x128 convolutional filters
         self.conv1 = nn.Conv2d(1, 128, kernel_size=4, stride=1, padding=1)
+        
+        # CNN Path 2: 6x64 convolutional filters
         self.conv2 = nn.Conv2d(1, 64, kernel_size=6, stride=1, padding=2)
         
-        # Calculate CNN output features
+        # Calculate CNN output features (128*2 from first path, 64*2 from second path)
         cnn_features = 128 * 2 + 64 * 2  # 384 (from max and avg pooling)
         
-        # Fully connected layers for combined features
+        # Fully connected layers for combined features (CNN outputs + feature vector)
         self.fc1 = nn.Linear(cnn_features + feature_size, 128)
         self.fc2 = nn.Linear(128, 64)
         self.fc3 = nn.Linear(64, 1)
@@ -30,23 +34,23 @@ class TetrisNet(nn.Module):
         board = x['board']  # [batch, 1, rows, cols]
         features = x['features']  # [batch, feature_size]
         
-        # Process board
+        # Process board through batch normalization
         board = self.batch_norm(board)
         
-        # CNN Path 1
+        # CNN Path 1: 4x128 convolution with max and avg pooling
         c1 = F.relu(self.conv1(board))
         c1_max = torch.max(c1.view(c1.size(0), c1.size(1), -1), dim=2)[0]
         c1_avg = torch.mean(c1.view(c1.size(0), c1.size(1), -1), dim=2)
         
-        # CNN Path 2
+        # CNN Path 2: 6x64 convolution with max and avg pooling
         c2 = F.relu(self.conv2(board))
         c2_max = torch.max(c2.view(c2.size(0), c2.size(1), -1), dim=2)[0]
         c2_avg = torch.mean(c2.view(c2.size(0), c2.size(1), -1), dim=2)
         
-        # Combine CNN features with additional features
+        # Concatenate all CNN features with the feature vector (matching diagram)
         combined = torch.cat([c1_max, c1_avg, c2_max, c2_avg, features], dim=1)
         
-        # Process through fully connected layers
+        # Process through fully connected layers (128 → 64 → 1)
         x = F.relu(self.fc1(combined))
         x = F.relu(self.fc2(x))
         return self.fc3(x)
@@ -303,6 +307,18 @@ class TetrisAI:
             app_copy.holdPiece = None
         app_copy.holdPieceColor = app.holdPieceColor
         
+        # Debug state before hold
+        is_hold_action = action.get('is_hold', False)
+        if is_hold_action:
+            print(f"BEFORE HOLD - holdPiece: {app_copy.holdPiece is not None}, holdPieceUsed: {app_copy.holdPieceUsed}")
+            if app_copy.holdPiece is not None:
+                hold_piece_idx = -1
+                for i, piece in enumerate(app_copy.tetrisPieces):
+                    if self._pieces_equal(piece, app_copy.holdPiece):
+                        hold_piece_idx = i
+                        break
+                print(f"BEFORE HOLD - holdPiece type: {hold_piece_idx}")
+        
         # Copy next pieces, but for s', we'll only use the first 3 next pieces
         # The 4th next piece will be represented by zeros in get_state_representation
         if len(app.nextPiecesIndices) > 0:
@@ -318,17 +334,66 @@ class TetrisAI:
         app_copy.fallingPieceCol = app.fallingPieceCol
         
         # Handle hold action
-        if action.get('is_hold', False):
+        if is_hold_action:
             # Use the existing holdPiece function for consistent behavior
-            from tetris_game import holdPiece
+            from tetris_game import holdPiece, fallingPieceIsLegal
+            
+            # Store the piece before hold for comparison
+            pre_hold_piece = [row[:] for row in app_copy.fallingPiece] if app_copy.fallingPiece else None
+            
+            # Call hold function
             holdPiece(app_copy)
-        
-        # Set piece state from action
-        app_copy.fallingPiece = [row[:] for row in action['piece']]  # Deep copy the piece
-        app_copy.fallingPieceRow = action['row']
-        app_copy.fallingPieceCol = action['col']
+            
+            # Debug state after hold
+            print(f"AFTER HOLD - holdPiece: {app_copy.holdPiece is not None}, holdPieceUsed: {app_copy.holdPieceUsed}")
+            if app_copy.holdPiece is not None:
+                hold_piece_idx = -1
+                for i, piece in enumerate(app_copy.tetrisPieces):
+                    if self._pieces_equal(piece, app_copy.holdPiece):
+                        hold_piece_idx = i
+                        break
+                print(f"AFTER HOLD - holdPiece type: {hold_piece_idx}")
+            
+            # Check if falling piece changed after hold
+            if pre_hold_piece is not None and app_copy.fallingPiece is not None:
+                pieces_equal = self._pieces_equal(pre_hold_piece, app_copy.fallingPiece)
+                print(f"HOLD EFFECT - Falling piece {'did not change' if pieces_equal else 'changed'} after hold")
+            
+            # Critical check: Is the action piece the same as what holdPiece determined?
+            action_piece = action['piece']
+            pieces_match = self._pieces_equal(action_piece, app_copy.fallingPiece)
+            print(f"ACTION CONSISTENCY - Action piece {'matches' if pieces_match else 'DOES NOT MATCH'} game piece after hold")
+            
+            # Instead of using the action's piece, we'll use the piece from holdPiece() 
+            # but position it according to the action's target location
+            target_row = action['row']
+            target_col = action['col']
+            
+            # Verify the position is valid before using it
+            if fallingPieceIsLegal(app_copy, target_row, target_col):
+                app_copy.fallingPieceRow = target_row
+                app_copy.fallingPieceCol = target_col
+            else:
+                # If invalid position, find a valid position by dropping the piece
+                app_copy.fallingPieceRow = 0
+                app_copy.fallingPieceCol = app_copy.cols // 2 - len(app_copy.fallingPiece[0]) // 2
+                
+                # Find a valid drop position
+                row = 0
+                while fallingPieceIsLegal(app_copy, row + 1, app_copy.fallingPieceCol):
+                    row += 1
+                app_copy.fallingPieceRow = row
+                
+                print(f"WARNING: Action position invalid, using drop position instead: row={row}, col={app_copy.fallingPieceCol}")
+        else:
+            # For non-hold actions, set piece state from action as usual
+            app_copy.fallingPiece = [row[:] for row in action['piece']]
+            app_copy.fallingPieceRow = action['row']
+            app_copy.fallingPieceCol = action['col']
         
         # Simulate placing the piece
+        from tetris_game import placeFallingPiece, newFallingPiece, fallingPieceIsLegal
+        
         original_score = app_copy.score
         placeFallingPiece(app_copy)
         score_change = app_copy.score - original_score
@@ -343,6 +408,10 @@ class TetrisAI:
         
         # Get state representation of resulting state
         next_state = self.get_state_representation(app_copy)
+        
+        # For hold actions, report final state
+        if is_hold_action:
+            print(f"FINAL HOLD STATE - Score change: {score_change}, Terminal: {is_terminal}")
         
         return next_state, reward, is_terminal
     

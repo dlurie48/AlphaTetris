@@ -293,6 +293,7 @@ class TetrisWithAI(App):
         if action is None or self.isGameOver:
             self.isGameOver = True
             return
+
         
         # Apply action
         self.fallingPiece = action['piece']
