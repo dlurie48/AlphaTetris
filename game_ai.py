@@ -16,10 +16,12 @@ class TetrisNet(nn.Module):
         self.batch_norm = nn.BatchNorm2d(1)
         
         # CNN Path 1: 4x128 convolutional filters
-        self.conv1 = nn.Conv2d(1, 128, kernel_size=4, stride=1, padding=1)
+        self.conv1_1 = nn.Conv2d(1, 64, kernel_size=4, stride=1, padding=1)
+        self.conv1_2 = nn.Conv2d(64, 128, kernel_size=4, stride=1, padding=1)
         
         # CNN Path 2: 6x64 convolutional filters
-        self.conv2 = nn.Conv2d(1, 64, kernel_size=6, stride=1, padding=2)
+        self.conv2_1 = nn.Conv2d(1, 32, kernel_size=6, stride=1, padding=2)
+        self.conv2_2 = nn.Conv2d(32, 64, kernel_size=6, stride=1, padding=2)
         
         # Calculate CNN output features (128*2 from first path, 64*2 from second path)
         cnn_features = 128 * 2 + 64 * 2  # 384 (from max and avg pooling)
@@ -27,7 +29,8 @@ class TetrisNet(nn.Module):
         # Fully connected layers for combined features (CNN outputs + feature vector)
         self.fc1 = nn.Linear(cnn_features + feature_size, 128)
         self.fc2 = nn.Linear(128, 64)
-        self.fc3 = nn.Linear(64, 1)
+        self.fc3 = nn.Linear(64, 32)
+        self.fc4 = nn.Linear(32, 1)
         
     def forward(self, x):
         # Extract components
@@ -38,22 +41,27 @@ class TetrisNet(nn.Module):
         board = self.batch_norm(board)
         
         # CNN Path 1: 4x128 convolution with max and avg pooling
-        c1 = F.relu(self.conv1(board))
-        c1_max = torch.max(c1.view(c1.size(0), c1.size(1), -1), dim=2)[0]
-        c1_avg = torch.mean(c1.view(c1.size(0), c1.size(1), -1), dim=2)
+        c1_1 = F.relu(self.conv1_1(board))
+        c1_2 = F.relu(self.conv1_2(c1_1))
+        c1_max = torch.max(c1_2.view(c1_2.size(0), c1_2.size(1), -1), dim=2)[0]
+        c1_avg = torch.mean(c1_2.view(c1_2.size(0), c1_2.size(1), -1), dim=2)
         
         # CNN Path 2: 6x64 convolution with max and avg pooling
-        c2 = F.relu(self.conv2(board))
-        c2_max = torch.max(c2.view(c2.size(0), c2.size(1), -1), dim=2)[0]
-        c2_avg = torch.mean(c2.view(c2.size(0), c2.size(1), -1), dim=2)
+        c2_1 = F.relu(self.conv2_1(board))
+        c2_2 = F.relu(self.conv2_2(c2_1))
+        c2_max = torch.max(c2_2.view(c2_2.size(0), c2_2.size(1), -1), dim=2)[0]
+        c2_avg = torch.mean(c2_2.view(c2_2.size(0), c2_2.size(1), -1), dim=2)
         
         # Concatenate all CNN features with the feature vector (matching diagram)
         combined = torch.cat([c1_max, c1_avg, c2_max, c2_avg, features], dim=1)
         
         # Process through fully connected layers (128 → 64 → 1)
         x = F.relu(self.fc1(combined))
+        x = F.dropout(x, 0.3)
         x = F.relu(self.fc2(x))
-        return self.fc3(x)
+        x = F.dropout(x, 0.2)
+        x = F.relu(self.fc3(x))
+        return self.fc4(x)
     
 class TetrisAI:
     def __init__(self):

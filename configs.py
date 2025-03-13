@@ -5,7 +5,7 @@ AI_CONFIG = {
     'buffer_size': 50000,       # Experience replay buffer size
     'batch_size': 512,          # Batch size for training
     'gamma': 0.95,              # Discount factor
-    'epsilon': 0.06,            # Exploration rate for ε-greedy policy
+    'epsilon': 0.00,            # Exploration rate for ε-greedy policy
     'epsilon_decay': 0.999,     # Decay rate for epsilon
     'epsilon_min': 0.001,        # Minimum epsilon value
     'learning_rate': 0.001,     # Learning rate for optimizer
