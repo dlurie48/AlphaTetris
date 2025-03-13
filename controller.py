@@ -237,6 +237,7 @@ class TetrisWithAI(App):
         """
         # Handle game over state - reset the board for AI watching mode
         if self.isGameOver and not batch_mode:
+            print(f"Episode #{self.aiEpisodes+1} total reward: {self.currentEpisodeReward}")
             self.aiEpisodes += 1
             self.episodeRewards.append(self.currentEpisodeReward)
             
@@ -272,9 +273,6 @@ class TetrisWithAI(App):
             self.ai.add_experience(self.lastState, self.lastAction, 
                                   reward, current_state, terminal)
             
-            if reward != 0 and not batch_mode:
-                print(f"Got reward: {reward}, total episode reward: {self.currentEpisodeReward}")
-            
             # Train the model
             loss = self.ai.train()
             if loss is not None:
@@ -294,7 +292,6 @@ class TetrisWithAI(App):
             self.isGameOver = True
             return
 
-        
         # Apply action
         self.fallingPiece = action['piece']
         self.fallingPieceRow = action['row']

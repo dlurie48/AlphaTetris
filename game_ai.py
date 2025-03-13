@@ -307,18 +307,6 @@ class TetrisAI:
             app_copy.holdPiece = None
         app_copy.holdPieceColor = app.holdPieceColor
         
-        # Debug state before hold
-        is_hold_action = action.get('is_hold', False)
-        if is_hold_action:
-            print(f"BEFORE HOLD - holdPiece: {app_copy.holdPiece is not None}, holdPieceUsed: {app_copy.holdPieceUsed}")
-            if app_copy.holdPiece is not None:
-                hold_piece_idx = -1
-                for i, piece in enumerate(app_copy.tetrisPieces):
-                    if self._pieces_equal(piece, app_copy.holdPiece):
-                        hold_piece_idx = i
-                        break
-                print(f"BEFORE HOLD - holdPiece type: {hold_piece_idx}")
-        
         # Copy next pieces, but for s', we'll only use the first 3 next pieces
         # The 4th next piece will be represented by zeros in get_state_representation
         if len(app.nextPiecesIndices) > 0:
@@ -334,66 +322,44 @@ class TetrisAI:
         app_copy.fallingPieceCol = app.fallingPieceCol
         
         # Handle hold action
-        if is_hold_action:
+        if action.get('is_hold', False):
             # Use the existing holdPiece function for consistent behavior
-            from tetris_game import holdPiece, fallingPieceIsLegal
-            
-            # Store the piece before hold for comparison
-            pre_hold_piece = [row[:] for row in app_copy.fallingPiece] if app_copy.fallingPiece else None
-            
-            # Call hold function
+            from tetris_game import holdPiece
             holdPiece(app_copy)
+        
+        # Apply the rotation and position from the action
+        # We already have the correct piece type from the hold operation (if any)
+        # so we just need to apply rotation and position
+        if action.get('is_hold', False):
+            # For hold actions, use the piece that resulted from holdPiece()
+            # Just apply the position and rotation
+            rotation = action.get('rotation', 0)
             
-            # Debug state after hold
-            print(f"AFTER HOLD - holdPiece: {app_copy.holdPiece is not None}, holdPieceUsed: {app_copy.holdPieceUsed}")
-            if app_copy.holdPiece is not None:
-                hold_piece_idx = -1
-                for i, piece in enumerate(app_copy.tetrisPieces):
-                    if self._pieces_equal(piece, app_copy.holdPiece):
-                        hold_piece_idx = i
-                        break
-                print(f"AFTER HOLD - holdPiece type: {hold_piece_idx}")
+            # Reset position to top center
+            app_copy.fallingPieceRow = 0
+            app_copy.fallingPieceCol = app_copy.cols // 2 - len(app_copy.fallingPiece[0]) // 2
             
-            # Check if falling piece changed after hold
-            if pre_hold_piece is not None and app_copy.fallingPiece is not None:
-                pieces_equal = self._pieces_equal(pre_hold_piece, app_copy.fallingPiece)
-                print(f"HOLD EFFECT - Falling piece {'did not change' if pieces_equal else 'changed'} after hold")
+            # Apply rotation
+            for _ in range(rotation):
+                from tetris_game import rotatePieceWithoutChecking
+                rotatePieceWithoutChecking(app_copy)
             
-            # Critical check: Is the action piece the same as what holdPiece determined?
-            action_piece = action['piece']
-            pieces_match = self._pieces_equal(action_piece, app_copy.fallingPiece)
-            print(f"ACTION CONSISTENCY - Action piece {'matches' if pieces_match else 'DOES NOT MATCH'} game piece after hold")
-            
-            # Instead of using the action's piece, we'll use the piece from holdPiece() 
-            # but position it according to the action's target location
-            target_row = action['row']
+            # Move to target column
             target_col = action['col']
+            while app_copy.fallingPieceCol > target_col:
+                app_copy.fallingPieceCol -= 1
+            while app_copy.fallingPieceCol < target_col:
+                app_copy.fallingPieceCol += 1
             
-            # Verify the position is valid before using it
-            if fallingPieceIsLegal(app_copy, target_row, target_col):
-                app_copy.fallingPieceRow = target_row
-                app_copy.fallingPieceCol = target_col
-            else:
-                # If invalid position, find a valid position by dropping the piece
-                app_copy.fallingPieceRow = 0
-                app_copy.fallingPieceCol = app_copy.cols // 2 - len(app_copy.fallingPiece[0]) // 2
-                
-                # Find a valid drop position
-                row = 0
-                while fallingPieceIsLegal(app_copy, row + 1, app_copy.fallingPieceCol):
-                    row += 1
-                app_copy.fallingPieceRow = row
-                
-                print(f"WARNING: Action position invalid, using drop position instead: row={row}, col={app_copy.fallingPieceCol}")
+            # Drop to target row
+            app_copy.fallingPieceRow = action['row']
         else:
-            # For non-hold actions, set piece state from action as usual
+            # For non-hold actions, we can directly set the piece and position
             app_copy.fallingPiece = [row[:] for row in action['piece']]
             app_copy.fallingPieceRow = action['row']
             app_copy.fallingPieceCol = action['col']
         
         # Simulate placing the piece
-        from tetris_game import placeFallingPiece, newFallingPiece, fallingPieceIsLegal
-        
         original_score = app_copy.score
         placeFallingPiece(app_copy)
         score_change = app_copy.score - original_score
@@ -408,10 +374,6 @@ class TetrisAI:
         
         # Get state representation of resulting state
         next_state = self.get_state_representation(app_copy)
-        
-        # For hold actions, report final state
-        if is_hold_action:
-            print(f"FINAL HOLD STATE - Score change: {score_change}, Terminal: {is_terminal}")
         
         return next_state, reward, is_terminal
     
