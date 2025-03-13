@@ -292,10 +292,19 @@ class TetrisWithAI(App):
             self.isGameOver = True
             return
 
-        # Apply action
-        self.fallingPiece = action['piece']
-        self.fallingPieceRow = action['row']
-        self.fallingPieceCol = action['col']
+        if action.get('is_hold', False):
+            # For hold actions, first execute the hold operation
+            holdPiece(self)
+            
+            # Then apply the position and rotation (the piece is now the hold piece)
+            self.fallingPiece = action['piece']
+            self.fallingPieceRow = action['row']
+            self.fallingPieceCol = action['col']
+        else:
+            # For regular moves, directly set the piece and position
+            self.fallingPiece = action['piece']
+            self.fallingPieceRow = action['row']
+            self.fallingPieceCol = action['col']
         
         # Place the piece and get a new one
         placeFallingPiece(self)

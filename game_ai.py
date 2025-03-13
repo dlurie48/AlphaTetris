@@ -326,6 +326,7 @@ class TetrisAI:
             # Use the existing holdPiece function for consistent behavior
             from tetris_game import holdPiece
             holdPiece(app_copy)
+
         
         # Apply the rotation and position from the action
         # We already have the correct piece type from the hold operation (if any)
