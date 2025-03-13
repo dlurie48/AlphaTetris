@@ -2,13 +2,13 @@
 
 # AI parameters
 AI_CONFIG = {
-    'buffer_size': 100000,       # Experience replay buffer size
+    'buffer_size': 50000,       # Experience replay buffer size
     'batch_size': 512,          # Batch size for training
     'gamma': 0.95,              # Discount factor
-    'epsilon': 0.05,            # Exploration rate for ε-greedy policy
+    'epsilon': 0.06,            # Exploration rate for ε-greedy policy
     'epsilon_decay': 0.999,     # Decay rate for epsilon
-    'epsilon_min': 0.005,        # Minimum epsilon value
-    'learning_rate': 0.002,     # Learning rate for optimizer
+    'epsilon_min': 0.001,        # Minimum epsilon value
+    'learning_rate': 0.001,     # Learning rate for optimizer
     'target_update': 10,        # Update target network every N episodes
     
     # Model hyperparameters
@@ -58,7 +58,8 @@ REWARDS = {
         3: 7.5,                 # Triple: 7.5 × line_clear
         4: 20.0,                # Tetris: 20.0 × line_clear
     },
-    'game_over': -10.0,         # Penalty for game over
-    'hole_created': -0.5,       # Penalty for creating a hole
-    'height_penalty': -0.02,    # Penalty per height unit (discourages high stacks)
+    'game_over': -50.0,         # Penalty for game over
+    'hole_created': -1,       # Penalty for creating a hole
+    'height_penalty': -0.1,    # Penalty per height unit (discourages high stacks)
+    'agg_height': -0.5
 }

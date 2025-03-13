@@ -562,7 +562,7 @@ class TetrisWithAI(App):
     def redrawAll(self, canvas):
         # For fast training mode, show minimal UI
         if self.gameMode == "ai_player_training":
-            self.drawTrainingOnlyScreen(canvas)
+            #self.drawTrainingOnlyScreen(canvas)
             return
         
         # For human and watching modes, draw the standard game

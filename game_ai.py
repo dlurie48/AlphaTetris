@@ -360,11 +360,35 @@ class TetrisAI:
             app_copy.fallingPieceRow = action['row']
             app_copy.fallingPieceCol = action['col']
         
+        from copy import deepcopy
+        original_board = deepcopy(app_copy.board)
+
         # Simulate placing the piece
         original_score = app_copy.score
         placeFallingPiece(app_copy)
         score_change = app_copy.score - original_score
+
+        original_features = calculate_state_features(original_board, app_copy.rows, app_copy.cols, app_copy.emptyColor)
+        new_features = calculate_state_features(app_copy.board, app_copy.rows, app_copy.cols, app_copy.emptyColor)
+        
+        # Initialize base reward from score change
         reward = score_change
+        
+        # Apply hole penalty
+        hole_change = new_features['holes'] - original_features['holes']
+        reward += hole_change * REWARDS['hole_created']
+        
+        agg_height_change = new_features['aggregate_height'] - original_features['aggregate_height']
+        reward += agg_height_change * REWARDS['agg_height']
+
+        # Apply height penalty
+        max_height_change = new_features['max_height'] - original_features['max_height']
+        reward += max_height_change * REWARDS['height_penalty']
+        
+        # Handle line clearing bonus
+        line_cleared = new_features['complete_lines']
+        line_bonus = REWARDS['multiple_lines'].get(line_cleared, 0) * REWARDS['line_clear']
+        #reward += line_bonus
         
         # Simulate getting a new piece to check game over
         newFallingPiece(app_copy)
